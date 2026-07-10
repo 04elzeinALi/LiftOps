@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"/c/xampp1/mysql/backup/\" 2>&1)",
+      "Read(//c/xampp1/mysql/backup//**)"
+    ]
+  }
+}
