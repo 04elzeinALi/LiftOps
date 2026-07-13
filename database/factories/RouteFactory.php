@@ -22,7 +22,7 @@ class RouteFactory extends Factory
             'origin' => fake()->word(),
             'destination' => fake()->word(),
             'distance_km' => fake()-> randomFloat(2,5,100),
-            'estimated_duration_hours' => fake()->numberBetween(1, 3) . 'h ' . fake()->numberBetween(0, 59) . 'm',
+            'estimated_duration' => fake()->numberBetween(1, 3) . 'h ' . fake()->numberBetween(0, 59) . 'm',
             'fare' => fake()->randomFloat(2, 50, 500)
         ];
     }

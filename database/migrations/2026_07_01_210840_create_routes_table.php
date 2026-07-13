@@ -17,7 +17,7 @@ return new class extends Migration
             $table->string('origin');
             $table->string('destination');
             $table->decimal('distance_km', 8,2);
-            $table->string('estimated_duration_hours');
+            $table->string('estimated_duration');
             $table->decimal('fare', 8,2);
             $table->timestamps();
         });

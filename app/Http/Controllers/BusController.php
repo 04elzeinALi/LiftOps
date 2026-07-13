@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Bus;
+use Illuminate\Http\Request;
 
 class BusController extends Controller
 {
@@ -12,10 +12,9 @@ class BusController extends Controller
      */
     public function index()
     {
-          $buses = Bus::all();
+        $buses = Bus::paginate(15);
 
-          return $buses;
-
+        return $buses;
     }
 
     /**
@@ -23,28 +22,27 @@ class BusController extends Controller
      */
     public function store(Request $request)
     {
-
-        $bus = Bus::create([
-            'plate_number' => $request->plate_number,
-            'manufacturer' => $request->manufacturer,
-            'model' => $request->model,
-            'production_year' => $request->production_year,
-            'capacity' => $request->capacity,
-            'status' => $request->status,
-
+        $validated = $request->validate([
+            'plate_number' => 'required|string|unique:buses',
+            'manufacturer' => 'required|string',
+            'model' => 'required|string',
+            'production_year' => 'required|integer',
+            'capacity' => 'required|integer',
+            'status' => 'required|in:in_service,out_of_service,maintenance',
         ]);
-        return $bus;
+
+        $bus = Bus::create($validated);
+
+        return response()->json($bus, 201);
     }
 
-
-    /**w
+    /**
      * Display the specified resource.
      */
-
-
     public function show(string $id)
     {
-        $bus = Bus::find($id);
+        $bus = Bus::findOrFail($id);
+
         return $bus;
     }
 
@@ -53,7 +51,19 @@ class BusController extends Controller
      */
     public function update(Request $request, string $id)
     {
-        //
+        $validated = $request->validate([
+            'plate_number' => 'sometimes|required|string|unique:buses,plate_number,' . $id,
+            'manufacturer' => 'sometimes|required|string',
+            'model' => 'sometimes|required|string',
+            'production_year' => 'sometimes|required|integer',
+            'capacity' => 'sometimes|required|integer',
+            'status' => 'sometimes|required|in:in_service,out_of_service,maintenance',
+        ]);
+
+        $bus = Bus::findOrFail($id);
+        $bus->update($validated);
+
+        return $bus;
     }
 
     /**
@@ -61,6 +71,9 @@ class BusController extends Controller
      */
     public function destroy(string $id)
     {
-        //
+        $bus = Bus::findOrFail($id);
+        $bus->delete();
+
+        return response()->json(['message' => 'Bus deleted successfully']);
     }
 }

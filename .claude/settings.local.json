@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(ls -la \"/c/xampp1/mysql/backup/\" 2>&1)",
-      "Read(//c/xampp1/mysql/backup//**)"
+      "Read(//c/xampp1/mysql/backup//**)",
+      "Bash(/c/Users/Admin/.config/herd/bin/php.bat artisan *)"
     ]
   }
 }
