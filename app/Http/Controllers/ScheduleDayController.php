@@ -12,7 +12,7 @@ class ScheduleDayController extends Controller
      */
     public function index()
     {
-        $scheduleDays = ScheduleDay::with('schedule')->paginate(15);
+        $scheduleDays = ScheduleDay::with('schedule.route')->paginate(15);
 
         return $scheduleDays;
     }
@@ -37,7 +37,7 @@ class ScheduleDayController extends Controller
      */
     public function show(string $id)
     {
-        $scheduleDay = ScheduleDay::with('schedule')->findOrFail($id);
+        $scheduleDay = ScheduleDay::with('schedule.route')->findOrFail($id);
 
         return $scheduleDay;
     }
