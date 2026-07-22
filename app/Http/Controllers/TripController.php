@@ -12,11 +12,19 @@ class TripController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $trips = Trip::with(['schedule.route', 'bus', 'driver'])->paginate(15);
+        $query = Trip::with(['schedule.route', 'bus', 'driver']);
 
-        return $trips;
+        if ($request->user()->role === 'driver') {
+            $query->whereHas('driver', fn ($q) => $q->where('user_id', $request->user()->id));
+        }
+
+        if ($request->filled('trip_date')) {
+            $query->whereDate('trip_date', $request->query('trip_date'));
+        }
+
+        return $query->paginate(15);
     }
 
     /**
@@ -63,9 +71,38 @@ class TripController extends Controller
 
     /**
      * Update the specified resource in storage.
+     *
+     * Admins may update any field. A driver may update only the `status`
+     * of a trip they are assigned to (start/end their own trip). Passengers
+     * have no access here.
      */
     public function update(Request $request, string $id)
     {
+        $user = $request->user();
+        $trip = Trip::findOrFail($id);
+
+        if ($user->role === 'passenger') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        if ($user->role === 'driver') {
+            $ownDriver = Driver::where('user_id', $user->id)->first();
+
+            if (! $ownDriver || $trip->driver_id !== $ownDriver->id) {
+                return response()->json([
+                    'message' => 'Forbidden: you are not the driver for this trip.',
+                ], 403);
+            }
+
+            $validated = $request->validate([
+                'status' => 'required|in:scheduled,ongoing,completed,cancelled',
+            ]);
+
+            $trip->update($validated);
+
+            return $trip;
+        }
+
         $validated = $request->validate([
             'schedule_id' => 'sometimes|required|exists:schedules,id',
             'bus_id' => 'sometimes|required|exists:buses,id',
@@ -90,7 +127,6 @@ class TripController extends Controller
             }
         }
 
-        $trip = Trip::findOrFail($id);
         $trip->update($validated);
 
         return $trip;

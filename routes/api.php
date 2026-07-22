@@ -51,10 +51,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('route-stations', [RouteStationController::class, 'destroy']);
     });
 
-    // Trips: any authenticated user can view; only admins can write.
-    Route::apiResource('trips', TripController::class)->only(['index', 'show']);
+    // Trips: any authenticated user can view; drivers may update only their
+    // own trip's status (see TripController::update); only admins can
+    // create/delete or edit other fields.
+    Route::apiResource('trips', TripController::class)->only(['index', 'show', 'update']);
     Route::middleware('role:admin')->group(function () {
-        Route::apiResource('trips', TripController::class)->only(['store', 'update', 'destroy']);
+        Route::apiResource('trips', TripController::class)->only(['store', 'destroy']);
     });
 
     // Ownership-gated resources — the controllers themselves check that a
