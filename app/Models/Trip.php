@@ -40,13 +40,14 @@ class Trip extends Model
     }
 
     /**
-     * Seats left on this trip's bus. Not stored — computed from the bus's
-     * capacity minus how many people have actually boarded so far.
+     * Seats left to reserve on this trip's bus. Not stored — computed from
+     * the bus's capacity minus how many booked reservations already exist,
+     * matching the same count ReservationController::store() enforces.
      */
     protected function availableSeats(): Attribute
     {
         return Attribute::make(
-            get: fn () => max(0, $this->bus->capacity - $this->boardings()->count()),
+            get: fn () => max(0, $this->bus->capacity - $this->reservations()->where('status', 'booked')->count()),
         );
     }
 }

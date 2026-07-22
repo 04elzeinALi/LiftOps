@@ -9,6 +9,20 @@ use Illuminate\Http\Request;
 class TravelCardController extends Controller
 {
     /**
+     * How many trips and how many days of validity a card_type grants.
+     * Mirrors the multiplier basis TravelCard::calculatePrice() already uses.
+     */
+    private function computeCardTerms(string $cardType): array
+    {
+        return match ($cardType) {
+            'single' => ['total_trips' => 1, 'expiry_days' => 1],
+            'return' => ['total_trips' => 2, 'expiry_days' => 3],
+            'weekly' => ['total_trips' => 5, 'expiry_days' => 7],
+            'monthly' => ['total_trips' => 20, 'expiry_days' => 30],
+        };
+    }
+
+    /**
      * Display a listing of the resource.
      */
     public function index(Request $request)
@@ -38,9 +52,6 @@ class TravelCardController extends Controller
             'passenger_id' => 'required|exists:passengers,id',
             'route_id' => 'required|exists:routes,id',
             'card_type' => 'required|in:single,return,weekly,monthly',
-            'purchase_date' => 'nullable|date',
-            'expiry_date' => 'required|date',
-            'total_trips' => 'required|integer',
             'status' => 'required|in:active,expired,suspended',
         ]);
 
@@ -51,6 +62,13 @@ class TravelCardController extends Controller
             $ownPassenger = Passenger::where('user_id', $user->id)->firstOrFail();
             $validated['passenger_id'] = $ownPassenger->id;
         }
+
+        // total_trips/expiry_date are computed server-side, not client-set —
+        // otherwise a client could send total_trips: 999999.
+        $terms = $this->computeCardTerms($validated['card_type']);
+        $validated['total_trips'] = $terms['total_trips'];
+        $validated['purchase_date'] = now()->toDateString();
+        $validated['expiry_date'] = now()->addDays($terms['expiry_days'])->toDateString();
 
         $travelCard = TravelCard::create($validated);
 
@@ -82,11 +100,14 @@ class TravelCardController extends Controller
             'passenger_id' => 'sometimes|required|exists:passengers,id',
             'route_id' => 'sometimes|required|exists:routes,id',
             'card_type' => 'sometimes|required|in:single,return,weekly,monthly',
-            'purchase_date' => 'nullable|date',
-            'expiry_date' => 'sometimes|required|date',
-            'total_trips' => 'sometimes|required|integer',
             'status' => 'sometimes|required|in:active,expired,suspended',
         ]);
+
+        if (isset($validated['card_type'])) {
+            $terms = $this->computeCardTerms($validated['card_type']);
+            $validated['total_trips'] = $terms['total_trips'];
+            $validated['expiry_date'] = now()->addDays($terms['expiry_days'])->toDateString();
+        }
 
         $travelCard->update($validated);
 

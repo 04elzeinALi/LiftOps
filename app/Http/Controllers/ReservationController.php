@@ -70,7 +70,7 @@ class ReservationController extends Controller
             $validated['passenger_id'] = $ownPassenger->id;
         }
 
-        $trip = Trip::with('bus')->findOrFail($validated['trip_id']);
+        $trip = Trip::with(['bus', 'schedule.route'])->findOrFail($validated['trip_id']);
 
         // Business rule: can't reserve a seat on a trip that's no longer running.
         if (in_array($trip->status, ['cancelled', 'completed'])) {
@@ -85,6 +85,13 @@ class ReservationController extends Controller
         if ($travelCard->status !== 'active' || $travelCard->expiry_date < now()->toDateString()) {
             return response()->json([
                 'message' => 'This travel card is not active or has expired.',
+            ], 422);
+        }
+
+        // Business rule: the travel card must be valid for this trip's route.
+        if ($travelCard->route_id !== $trip->schedule->route_id) {
+            return response()->json([
+                'message' => 'This travel card is not valid for this route.',
             ], 422);
         }
 
