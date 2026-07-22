@@ -11,6 +11,8 @@ class Reservation extends Model
 {
     use HasFactory;
 
+    protected $casts = ['reservation_time' => 'datetime'];
+
        public function trip()
     {
         return $this->belongsTo(Trip::class);
