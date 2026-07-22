@@ -13,6 +13,7 @@ class Boarding extends Model
     use HasFactory;
 
     protected $table = 'boarding';
+    protected $casts = ['boarded_at' => 'datetime'];
 
      public function trip()
     {
