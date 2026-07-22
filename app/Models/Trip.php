@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,6 +11,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 class Trip extends Model
 {
     use HasFactory;
+
+    protected $appends = ['available_seats'];
 
        public function schedule()
     {
@@ -34,5 +37,16 @@ class Trip extends Model
        public function attendances()
     {
         return $this->hasMany(Attendance::class);
+    }
+
+    /**
+     * Seats left on this trip's bus. Not stored — computed from the bus's
+     * capacity minus how many people have actually boarded so far.
+     */
+    protected function availableSeats(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => max(0, $this->bus->capacity - $this->boardings()->count()),
+        );
     }
 }

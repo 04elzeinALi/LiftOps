@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,6 +11,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 class TravelCard extends Model
 {
     use HasFactory;
+
+    protected $appends = ['remaining_trips'];
 
         public function passenger()
     {
@@ -31,4 +34,27 @@ class TravelCard extends Model
     {
         return $this->hasMany(Payment::class);
     }
+    public function calculatePrice(): float
+{
+    $fare = $this->route->fare;
+
+    return match ($this->card_type) {
+        'single' => $fare * 1,
+        'return' => $fare * 2,
+        'weekly' => $fare * 5 * 0.90,
+        'monthly' => $fare * 20 * 0.80,
+    };
+}
+
+    /**
+     * How many trips are left on this card. Not stored — computed from
+     * total_trips minus how many times it has actually been used to board.
+     */
+    protected function remainingTrips(): Attribute
+    {
+        return Attribute::make(
+            get: fn () => max(0, $this->total_trips - $this->boardings()->count()),
+        );
+    }
+
 }

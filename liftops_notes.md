@@ -26,8 +26,42 @@ LiftOps is a bus transportation management system built with **Laravel** (backen
 - [x] All models created with relationships (16 total)
 - [x] All factories created (16 total)
 - [x] All seeders created (15 total) + DatabaseSeeder wired up
-- [ ] API Routes + Controllers
-- [ ] React frontend
+- [x] API Routes + Controllers (16 resources, validated, paginated, eager-loaded)
+- [x] Business rules enforced (payment-before-reservation, remaining-trips, seat/capacity limits, trip/card status checks)
+- [x] Auth (Sanctum register/login/logout, all routes token-protected)
+- [x] Role-based access control (admin/passenger/driver permission matrix)
+- [x] Travel card pricing (auto-calculated server-side from route fare × card type)
+- [ ] React frontend — **in progress, foundation being planned now**
+
+---
+
+## Backend — API & Business Logic Summary
+
+**All 16 resources** have full CRUD controllers behind `/api/...`, each with:
+- Request validation (`required`, `in:`, `exists:`) instead of trusting raw input
+- `findOrFail` for clean 404s instead of crashes
+- `201` on create, pagination (`paginate(15)`) on list endpoints
+- Eager-loaded relationships so responses include real nested data, not just foreign key IDs
+
+**Business rules enforced (not just documented):**
+- A passenger must have a **paid** `TravelCard` before booking a `Reservation`.
+- A `TravelCard` can't be used to board once its `total_trips` are used up — exposed live as `remaining_trips` on every TravelCard response (computed accessor, not stored).
+- A `Trip`'s `available_seats` (bus capacity − boardings) is enforced on both `Reservation` and `Boarding` creation, and shown live on every Trip response.
+- `seat_number` must be unique per trip (no double-booking a seat).
+- A `TravelCard` must be `active` and not expired to reserve/board with it.
+- `Reservation`s are blocked on `cancelled`/`completed` trips.
+- `Trip` creation/update requires an `in_service` bus and an `active` driver.
+- **Travel card pricing** is fully server-computed (`TravelCard::calculatePrice()`): `single` = 1× route fare, `return` = 2×, `weekly` = 5×fare×0.90, `monthly` = 20×fare×0.80. Client-sent `amount` is ignored entirely — can't be spoofed.
+
+**Auth & RBAC:**
+- Sanctum token auth: `POST /register`, `POST /login`, `POST /logout` (logout requires a token).
+- Every other route requires `auth:sanctum`.
+- **Admin-only** (any action): Buses, Stations, Routes, Drivers, Schedules, ScheduleDays, Maintenance, RouteStations.
+- **Trips**: anyone logged in can read; only admin can write.
+- **Passengers, TravelCards, Reservations, Payments, Boardings**: admin sees/does everything; a passenger is scoped to their own records only; drivers get scoped read (+ create for TravelCards/Payments/Boardings, to support a walk-up rider paying cash directly to the driver).
+- **Attendance**: admin all; driver own records only; passenger blocked.
+- Known gap (accepted, not fixed): TravelCard/Payment driver-create access isn't scoped to "only my trip" since those tables have no `trip_id` — a schema limitation, not a bug.
+- Known gap (flagged, not yet fixed): the public `/register` endpoint currently trusts a client-sent `role` field — anyone could self-register as `admin`. Should be fixed to force `role: passenger` before a public registration form goes live.
 
 ---
 
@@ -175,4 +209,32 @@ fake()->bothify('??-#######')      // custom pattern (letters/numbers)
 
 ---
 
-## Next Up: API Routes + Controllers
+## Frontend — Foundation Plan (design in progress)
+
+Decomposed into sub-projects: **Foundation first** (this section), then one role interface at a time — **Admin panel next**, then Driver, then Passenger.
+
+**Decisions made so far:**
+- **Language:** Plain JavaScript (not TypeScript) — keep the learning curve on React itself, not React + TS at once.
+- **Project structure:** A genuinely **separate** standalone React app, sibling folder `c:\Users\Admin\liftops-frontend\` (not inside `LiftOps/`). Means CORS needs configuring on the Laravel side.
+- **App shape:** **One** React app with role-based routing — not 3 separate apps. After login, the app reads `user.role` and shows the right nav/dashboard. Shared login, API client, and components across all 3 roles.
+- **Data fetching:** **Axios + TanStack Query** — Query handles loading/error states, caching, and refetch-after-mutation automatically across all 16 resources, instead of hand-rolling `useState`/`useEffect` in every screen.
+- **UI:** **shadcn/ui + Tailwind** — accessible, editable (copy-in, not a black-box package) components for tables/dialogs/forms, which the admin panel especially will lean on heavily.
+- **Auth token storage:** **localStorage** (standard for token-based, non-cookie APIs like this one; accepted XSS tradeoff for this project's scope).
+- **Registration scope:** Foundation ships **Login only** — no public self-registration page yet. Passenger/driver accounts get created via the admin panel (next sub-project). Public registration is a later, separate feature — and needs the `role`-trust backend bug (above) fixed first.
+
+**Planned route map:**
+```
+/login                    public
+/                          protected — redirects to /admin, /driver, or /passenger by role
+/admin/*                  protected, admin-only   (placeholder screens for now)
+/driver/*                 protected, driver-only  (placeholder screens for now)
+/passenger/*               protected, passenger-only (placeholder screens for now)
+```
+
+**Auth flow:** `AuthContext` holds `{ user, token, login, logout }`, checks localStorage + `GET /api/user` on load. Login posts to `/api/login`, stores token, redirects by role. A `ProtectedRoute` wrapper blocks unauthenticated/wrong-role access. Axios response interceptor catches any `401` globally → auto-logout → redirect to `/login`.
+
+*(Full spec being written to `docs/superpowers/specs/` once design is approved — see that file for the complete, final version.)*
+
+---
+
+## Next Up: Finish Frontend Foundation design → build it → Admin panel

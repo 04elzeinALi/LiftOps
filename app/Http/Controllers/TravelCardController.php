@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Passenger;
 use App\Models\TravelCard;
 use Illuminate\Http\Request;
 
@@ -10,11 +11,20 @@ class TravelCardController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $travelCards = TravelCard::with(['passenger', 'route'])->paginate(15);
+        $user = $request->user();
 
-        return $travelCards;
+        $query = TravelCard::with(['passenger', 'route']);
+
+        // A passenger only sees their own cards. Drivers see everything
+        // (no trip_id on this table to scope by) so they can check a
+        // walk-up rider's card before letting them board.
+        if ($user->role === 'passenger') {
+            $query->whereHas('passenger', fn ($q) => $q->where('user_id', $user->id));
+        }
+
+        return $query->paginate(15);
     }
 
     /**
@@ -22,6 +32,8 @@ class TravelCardController extends Controller
      */
     public function store(Request $request)
     {
+        $user = $request->user();
+
         $validated = $request->validate([
             'passenger_id' => 'required|exists:passengers,id',
             'route_id' => 'required|exists:routes,id',
@@ -32,6 +44,14 @@ class TravelCardController extends Controller
             'status' => 'required|in:active,expired,suspended',
         ]);
 
+        // A passenger can only buy a travel card tied to their own profile.
+        // Drivers may create one for any passenger — this covers a walk-up
+        // rider paying cash directly to the driver for a single-trip card.
+        if ($user->role === 'passenger') {
+            $ownPassenger = Passenger::where('user_id', $user->id)->firstOrFail();
+            $validated['passenger_id'] = $ownPassenger->id;
+        }
+
         $travelCard = TravelCard::create($validated);
 
         return response()->json($travelCard, 201);
@@ -40,9 +60,11 @@ class TravelCardController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(string $id)
+    public function show(Request $request, string $id)
     {
         $travelCard = TravelCard::with(['passenger', 'route'])->findOrFail($id);
+
+        $this->authorizeView($request, $travelCard);
 
         return $travelCard;
     }
@@ -52,6 +74,10 @@ class TravelCardController extends Controller
      */
     public function update(Request $request, string $id)
     {
+        $travelCard = TravelCard::findOrFail($id);
+
+        $this->authorizeWrite($request, $travelCard);
+
         $validated = $request->validate([
             'passenger_id' => 'sometimes|required|exists:passengers,id',
             'route_id' => 'sometimes|required|exists:routes,id',
@@ -62,7 +88,6 @@ class TravelCardController extends Controller
             'status' => 'sometimes|required|in:active,expired,suspended',
         ]);
 
-        $travelCard = TravelCard::findOrFail($id);
         $travelCard->update($validated);
 
         return $travelCard;
@@ -71,11 +96,52 @@ class TravelCardController extends Controller
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(string $id)
+    public function destroy(Request $request, string $id)
     {
         $travelCard = TravelCard::findOrFail($id);
+
+        $this->authorizeWrite($request, $travelCard);
+
         $travelCard->delete();
 
         return response()->json(['message' => 'Travel card deleted successfully']);
+    }
+
+    /**
+     * Admins and drivers may view any card; a passenger may only view a
+     * card tied to their own Passenger profile.
+     */
+    private function authorizeView(Request $request, TravelCard $travelCard): void
+    {
+        $user = $request->user();
+
+        if ($user->role === 'admin' || $user->role === 'driver') {
+            return;
+        }
+
+        if ($user->role === 'passenger' && $travelCard->passenger?->user_id === $user->id) {
+            return;
+        }
+
+        abort(response()->json(['message' => 'Forbidden'], 403));
+    }
+
+    /**
+     * Only admins, or the owning passenger, may update/delete a card.
+     * Drivers can create cards (walk-up sales) but not edit existing ones.
+     */
+    private function authorizeWrite(Request $request, TravelCard $travelCard): void
+    {
+        $user = $request->user();
+
+        if ($user->role === 'admin') {
+            return;
+        }
+
+        if ($user->role === 'passenger' && $travelCard->passenger?->user_id === $user->id) {
+            return;
+        }
+
+        abort(response()->json(['message' => 'Forbidden'], 403));
     }
 }
