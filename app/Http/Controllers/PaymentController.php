@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Driver;
 use App\Models\Payment;
 use App\Models\TravelCard;
 use Illuminate\Http\Request;
@@ -15,7 +16,7 @@ class PaymentController extends Controller
     {
         $user = $request->user();
 
-        $query = Payment::with('travelCard');
+        $query = Payment::with(['travelCard.passenger', 'collectedByDriver']);
 
         // A passenger only sees payments on their own cards. Drivers see
         // everything (no trip_id on this table to scope by) so they can
@@ -42,6 +43,7 @@ class PaymentController extends Controller
             'payment_method' => 'required|in:cash,credit_card,bank_transfer,wish',
             'payment_status' => 'required|in:unpaid,paid,failed',
             'paid_at' => 'nullable|date',
+            'collected_by_driver_id' => 'sometimes|nullable|exists:drivers,id',
         ]);
 
         // A passenger can only pay towards their own travel card. Drivers
@@ -56,6 +58,14 @@ class PaymentController extends Controller
                 return response()->json(['message' => 'Forbidden'], 403);
             }
         }
+
+        // A driver's own payment is always attributed to themselves,
+        // regardless of what (if anything) was sent for this field.
+        if ($user->role === 'driver') {
+            $ownDriver = Driver::where('user_id', $user->id)->first();
+            $validated['collected_by_driver_id'] = $ownDriver?->id;
+        }
+
         $travelCard = TravelCard::with('route')->findOrFail($validated['travel_card_id']);
     $validated['amount'] = $travelCard->calculatePrice();
 
@@ -69,7 +79,7 @@ class PaymentController extends Controller
      */
     public function show(Request $request, string $id)
     {
-        $payment = Payment::with('travelCard')->findOrFail($id);
+        $payment = Payment::with(['travelCard.passenger', 'collectedByDriver'])->findOrFail($id);
 
         $this->authorizeView($request, $payment);
 
@@ -90,6 +100,7 @@ class PaymentController extends Controller
             'payment_method' => 'sometimes|required|in:cash,credit_card,bank_transfer,wish',
             'payment_status' => 'sometimes|required|in:unpaid,paid,failed',
             'paid_at' => 'nullable|date',
+            'collected_by_driver_id' => 'sometimes|nullable|exists:drivers,id',
         ]);
 
         $travelCardID = $validated['travel_card_id'] ?? $payment->travel_card_id;

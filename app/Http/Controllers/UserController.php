@@ -8,13 +8,21 @@ use Illuminate\Http\Request;
 class UserController extends Controller
 {
     /**
-     * List users with role=driver that don't already have a Driver profile.
-     * Used to populate the "assign to user" picker when creating a Driver.
+     * List users with the given role that don't already have a matching
+     * profile record. Used to populate the "assign to user" picker when
+     * creating a Driver or a Passenger. ?role= must be "driver" or
+     * "passenger" — both are valid relationship names on User.
      */
     public function index(Request $request)
     {
-        $users = User::where('role', 'driver')
-            ->whereDoesntHave('driver')
+        $role = $request->query('role', 'driver');
+
+        if (! in_array($role, ['driver', 'passenger'])) {
+            return response()->json(['message' => 'Invalid role filter.'], 422);
+        }
+
+        $users = User::where('role', $role)
+            ->whereDoesntHave($role)
             ->paginate(15);
 
         return $users;
