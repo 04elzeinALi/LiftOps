@@ -3,30 +3,61 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use App\Models\Passenger;
 use App\Models\User;
 use Illuminate\Http\Request;
 
 class AuthController extends Controller
 {
+    /**
+     * Public passenger self-registration. Creates a User AND its linked
+     * Passenger profile in one transaction, then logs them straight in.
+     *
+     * The role is forced to 'passenger' server-side and never taken from
+     * the request — admins and drivers are created by an admin, not
+     * self-registered. (This closes a privilege-escalation hole where the
+     * endpoint used to trust a client-sent `role`.)
+     */
     public function register(Request $request)
 {
     $validated = $request->validate([
-        'name' => 'required|string',
+        'first_name' => 'required|string',
+        'last_name' => 'required|string',
         'email' => 'required|email|unique:users',
+        'phone_number' => 'required|string',
         'password' => 'required|confirmed',
-        'role' => 'required|in:admin,driver,passenger',
-
     ]);
 
-    $validated['password'] = Hash::make($validated['password']);
-     $user = User::create($validated);
-     $token = $user->createToken('auth_token')->plainTextToken;
+    $user = DB::transaction(function () use ($validated) {
+        $user = User::create([
+            'name' => $validated['first_name'] . ' ' . $validated['last_name'],
+            'email' => $validated['email'],
+            'password' => Hash::make($validated['password']),
+            'role' => 'passenger',
+        ]);
 
-     return response()->json([
-         'user' => $user,
-         'token' => $token,
-         ],201);
+        Passenger::create([
+            'user_id' => $user->id,
+            'first_name' => $validated['first_name'],
+            'last_name' => $validated['last_name'],
+            'phone_number' => $validated['phone_number'],
+            'status' => 'active',
+        ]);
+
+        return $user;
+    });
+
+    $token = $user->createToken('auth_token')->plainTextToken;
+
+    return response()->json([
+        'message' => 'Registration successful.',
+        'data' => [
+            'user' => $user,
+            'token' => $token,
+        ],
+    ], 201);
 }
 
 public function login(Request $request)
