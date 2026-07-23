@@ -69,6 +69,12 @@ class PaymentController extends Controller
         $travelCard = TravelCard::with('route')->findOrFail($validated['travel_card_id']);
     $validated['amount'] = $travelCard->calculatePrice();
 
+        // Stamp when it was paid if it's coming in as paid and the caller
+        // didn't supply a time — so "when was this paid" is answerable later.
+        if (($validated['payment_status'] ?? null) === 'paid' && empty($validated['paid_at'])) {
+            $validated['paid_at'] = now();
+        }
+
         $payment = Payment::create($validated);
 
         return response()->json($payment, 201);
@@ -106,6 +112,12 @@ class PaymentController extends Controller
         $travelCardID = $validated['travel_card_id'] ?? $payment->travel_card_id;
         $travelCard = TravelCard::with('route')->findOrFail($travelCardID);
         $validated['amount'] = $travelCard->calculatePrice();
+
+        // Stamp paid_at when this update marks it paid and there's no time yet.
+        if (($validated['payment_status'] ?? null) === 'paid' && empty($validated['paid_at']) && empty($payment->paid_at)) {
+            $validated['paid_at'] = now();
+        }
+
         $payment->update($validated);
 
         return $payment;

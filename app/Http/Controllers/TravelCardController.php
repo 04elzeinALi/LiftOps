@@ -29,7 +29,7 @@ class TravelCardController extends Controller
     {
         $user = $request->user();
 
-        $query = TravelCard::with(['passenger', 'route']);
+        $query = TravelCard::with(['passenger', 'route'])->withCount('boardings');
 
         // A passenger only sees their own cards. Drivers see everything
         // (no trip_id on this table to scope by) so they can check a

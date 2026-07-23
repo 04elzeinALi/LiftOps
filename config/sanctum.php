@@ -50,7 +50,9 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Tokens expire after 7 days (was null = never expire, so a leaked
+    // token was valid forever). Overridable via SANCTUM_TOKEN_EXPIRATION.
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 60 * 24 * 7),
 
     /*
     |--------------------------------------------------------------------------

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 use App\Models\Passenger;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -27,7 +28,7 @@ class AuthController extends Controller
         'last_name' => 'required|string',
         'email' => 'required|email|unique:users',
         'phone_number' => 'required|string',
-        'password' => 'required|confirmed',
+        'password' => ['required', 'confirmed', Password::min(8)],
     ]);
 
     $user = DB::transaction(function () use ($validated) {

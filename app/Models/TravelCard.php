@@ -49,11 +49,13 @@ class TravelCard extends Model
     /**
      * How many trips are left on this card. Not stored — computed from
      * total_trips minus how many times it has actually been used to board.
+     * Uses the eager-loaded boardings_count when present (withCount) to
+     * avoid an N+1 query per row on list endpoints.
      */
     protected function remainingTrips(): Attribute
     {
         return Attribute::make(
-            get: fn () => max(0, $this->total_trips - $this->boardings()->count()),
+            get: fn () => max(0, $this->total_trips - ($this->boardings_count ?? $this->boardings()->count())),
         );
     }
 
