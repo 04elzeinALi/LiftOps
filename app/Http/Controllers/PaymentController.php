@@ -32,6 +32,56 @@ class PaymentController extends Controller
     }
 
     /**
+     * Admin financial oversight: total billed (every payment, any status)
+     * vs total received (payment_status = paid) for a period, plus the same
+     * split per collecting driver — lets an admin catch a driver who
+     * recorded a cash sale but never marked it paid (or the money never
+     * actually showed up).
+     */
+    public function summary(Request $request)
+    {
+        $period = $request->query('period', 'day');
+
+        [$start, $end] = match ($period) {
+            'week' => [now()->startOfWeek(), now()->endOfWeek()],
+            'month' => [now()->startOfMonth(), now()->endOfMonth()],
+            default => [now()->startOfDay(), now()->endOfDay()],
+        };
+
+        $inPeriod = Payment::whereBetween('created_at', [$start, $end]);
+
+        $totalBilled = (clone $inPeriod)->sum('amount');
+        $totalReceived = (clone $inPeriod)->where('payment_status', 'paid')->sum('amount');
+
+        $driverRows = Payment::whereBetween('created_at', [$start, $end])
+            ->whereNotNull('collected_by_driver_id')
+            ->selectRaw('collected_by_driver_id, SUM(amount) as billed, SUM(CASE WHEN payment_status = "paid" THEN amount ELSE 0 END) as received')
+            ->groupBy('collected_by_driver_id')
+            ->get();
+
+        $drivers = Driver::whereIn('id', $driverRows->pluck('collected_by_driver_id'))->get()->keyBy('id');
+
+        $byDriver = $driverRows->map(function ($row) use ($drivers) {
+            $driver = $drivers->get($row->collected_by_driver_id);
+            return [
+                'driver_id' => $row->collected_by_driver_id,
+                'driver_name' => $driver ? trim($driver->first_name . ' ' . $driver->last_name) : 'Unknown',
+                'billed' => (float) $row->billed,
+                'received' => (float) $row->received,
+            ];
+        })->values();
+
+        return response()->json([
+            'period' => $period,
+            'start' => $start->toDateTimeString(),
+            'end' => $end->toDateTimeString(),
+            'total_billed' => (float) $totalBilled,
+            'total_received' => (float) $totalReceived,
+            'by_driver' => $byDriver,
+        ]);
+    }
+
+    /**
      * Store a newly created resource in storage.
      */
     public function store(Request $request)

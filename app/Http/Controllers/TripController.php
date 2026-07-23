@@ -102,7 +102,10 @@ class TripController extends Controller
             }
 
             $validated = $request->validate([
-                'status' => 'required|in:scheduled,ongoing,completed,cancelled',
+                // 'emergency' lets a driver flag a trip they're on — not a
+                // normal lifecycle transition, but a distress signal an
+                // admin should notice.
+                'status' => 'required|in:scheduled,ongoing,completed,cancelled,emergency',
             ]);
 
             $trip->update($validated);
@@ -117,7 +120,7 @@ class TripController extends Controller
             'trip_date' => 'sometimes|required|date',
             'actual_departure' => 'nullable|date',
             'actual_arrival' => 'nullable|date',
-            'status' => 'sometimes|required|in:scheduled,ongoing,completed,cancelled',
+            'status' => 'sometimes|required|in:scheduled,ongoing,completed,cancelled,emergency',
         ]);
 
         if (isset($validated['bus_id'])) {

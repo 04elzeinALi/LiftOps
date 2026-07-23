@@ -38,11 +38,17 @@ Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:6,
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
 
+    // Stations and Routes: any authenticated user can browse them (drivers
+    // and passengers need this to populate pickers — travel card routes,
+    // pickup-location stations); only admins can create/edit/delete.
+    Route::apiResource('stations', StationController::class)->only(['index', 'show']);
+    Route::apiResource('routes', RouteController::class)->only(['index', 'show']);
+
     // admin-only management resources
     Route::middleware('role:admin')->group(function () {
         Route::apiResource('buses', BusController::class);
-        Route::apiResource('stations', StationController::class);
-        Route::apiResource('routes', RouteController::class);
+        Route::apiResource('stations', StationController::class)->only(['store', 'update', 'destroy']);
+        Route::apiResource('routes', RouteController::class)->only(['store', 'update', 'destroy']);
         Route::apiResource('drivers', DriverController::class);
         Route::get('users', [UserController::class, 'index']);
         Route::apiResource('schedules', ScheduleController::class);
@@ -51,6 +57,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('route-stations', [RouteStationController::class, 'index']);
         Route::post('route-stations', [RouteStationController::class, 'store']);
         Route::delete('route-stations', [RouteStationController::class, 'destroy']);
+        // Must be registered before the payments apiResource below, or
+        // "summary" gets swallowed by the payments/{payment} show route.
+        Route::get('payments/summary', [PaymentController::class, 'summary']);
     });
 
     // Trips: any authenticated user can view; drivers may update only their

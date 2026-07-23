@@ -89,6 +89,15 @@ class PassengerController extends Controller
 
         $passenger->update($validated);
 
+        // Passenger.first_name/last_name is the source of truth for this
+        // person's name, but the account (User.name, shown in headers etc.)
+        // is a separate field — keep it in sync so it doesn't go stale.
+        if (isset($validated['first_name']) || isset($validated['last_name'])) {
+            $passenger->user->update([
+                'name' => $passenger->first_name . ' ' . $passenger->last_name,
+            ]);
+        }
+
         return $passenger;
     }
 

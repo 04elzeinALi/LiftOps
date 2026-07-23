@@ -67,6 +67,15 @@ class DriverController extends Controller
         $driver = Driver::findOrFail($id);
         $driver->update($validated);
 
+        // Driver.first_name/last_name is the source of truth for this
+        // person's name, but the account (User.name, shown in headers etc.)
+        // is a separate field — keep it in sync so it doesn't go stale.
+        if (isset($validated['first_name']) || isset($validated['last_name'])) {
+            $driver->user->update([
+                'name' => $driver->first_name . ' ' . $driver->last_name,
+            ]);
+        }
+
         return $driver;
     }
 
