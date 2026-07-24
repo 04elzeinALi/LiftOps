@@ -2,8 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Boarding;
 use App\Models\Passenger;
+use App\Models\Payment;
+use App\Models\Reservation;
+use App\Models\TravelCard;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -11,6 +16,57 @@ use Illuminate\Validation\Rules\Password;
 
 class PassengerController extends Controller
 {
+    /**
+     * Everything this passenger did on one local calendar day (admin view):
+     * reservations booked, trips boarded, cards obtained, payments made.
+     * Each table filters by its own "when it happened" field, in the
+     * operator's local zone converted to the UTC the timestamps are stored in.
+     */
+    public function activity(Request $request, string $id)
+    {
+        $passenger = Passenger::with('user')->findOrFail($id);
+
+        $request->validate(['date' => 'nullable|date']);
+
+        $tz = config('app.display_timezone');
+        $date = $request->query('date', now($tz)->toDateString());
+        $start = Carbon::parse($date, $tz)->startOfDay()->utc();
+        $end = Carbon::parse($date, $tz)->endOfDay()->utc();
+
+        $reservations = Reservation::with('trip.schedule.route')
+            ->where('passenger_id', $passenger->id)
+            ->whereBetween('created_at', [$start, $end])
+            ->latest()
+            ->get();
+
+        $boardings = Boarding::with('trip.schedule.route')
+            ->where('passenger_id', $passenger->id)
+            ->whereBetween('boarded_at', [$start, $end])
+            ->latest('boarded_at')
+            ->get();
+
+        $travelCards = TravelCard::with('route')
+            ->where('passenger_id', $passenger->id)
+            ->whereBetween('created_at', [$start, $end])
+            ->latest()
+            ->get();
+
+        $payments = Payment::with('travelCard', 'collectedByDriver')
+            ->whereHas('travelCard', fn ($q) => $q->where('passenger_id', $passenger->id))
+            ->whereBetween('created_at', [$start, $end])
+            ->latest()
+            ->get();
+
+        return response()->json([
+            'passenger' => $passenger,
+            'date' => $date,
+            'reservations' => $reservations,
+            'boardings' => $boardings,
+            'travel_cards' => $travelCards,
+            'payments' => $payments,
+        ]);
+    }
+
     /**
      * Display a listing of the resource.
      */

@@ -2,8 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Attendance;
 use App\Models\Driver;
+use App\Models\Payment;
+use App\Models\Trip;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -19,6 +23,49 @@ class DriverController extends Controller
         $drivers = Driver::with('user')->paginate(15);
 
         return $drivers;
+    }
+
+    /**
+     * Everything this driver did on one local calendar day (admin view):
+     * trips driven, cash they collected (to reconcile against what they
+     * turned in), and attendance. Trips filter by trip_date (a calendar
+     * date); timestamped records use the local-day-to-UTC window.
+     */
+    public function activity(Request $request, string $id)
+    {
+        $driver = Driver::with('user')->findOrFail($id);
+
+        $request->validate(['date' => 'nullable|date']);
+
+        $tz = config('app.display_timezone');
+        $date = $request->query('date', now($tz)->toDateString());
+        $start = Carbon::parse($date, $tz)->startOfDay()->utc();
+        $end = Carbon::parse($date, $tz)->endOfDay()->utc();
+
+        $trips = Trip::with(['schedule.route', 'bus'])
+            ->where('driver_id', $driver->id)
+            ->whereDate('trip_date', $date)
+            ->get();
+
+        $payments = Payment::with('travelCard.passenger')
+            ->where('collected_by_driver_id', $driver->id)
+            ->whereBetween('created_at', [$start, $end])
+            ->latest()
+            ->get();
+
+        $attendance = Attendance::with('trip.schedule.route')
+            ->where('driver_id', $driver->id)
+            ->whereBetween('check_in', [$start, $end])
+            ->latest('check_in')
+            ->get();
+
+        return response()->json([
+            'driver' => $driver,
+            'date' => $date,
+            'trips' => $trips,
+            'payments' => $payments,
+            'attendance' => $attendance,
+        ]);
     }
 
     /**

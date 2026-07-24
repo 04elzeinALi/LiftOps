@@ -60,6 +60,12 @@ Route::middleware('auth:sanctum')->group(function () {
         // Must be registered before the payments apiResource below, or
         // "summary" gets swallowed by the payments/{payment} show route.
         Route::get('payments/summary', [PaymentController::class, 'summary']);
+
+        // Admin-only per-user activity for one local day. Passengers'
+        // apiResource lives in the ownership-gated group below, so these
+        // admin views are declared explicitly here.
+        Route::get('drivers/{driver}/activity', [DriverController::class, 'activity']);
+        Route::get('passengers/{passenger}/activity', [PassengerController::class, 'activity']);
     });
 
     // Trips: any authenticated user can view; drivers may update only their
