@@ -3,7 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Driver;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class DriverController extends Controller
 {
@@ -19,11 +23,19 @@ class DriverController extends Controller
 
     /**
      * Store a newly created resource in storage.
+     *
+     * Accepts EITHER an existing user_id (an already-created user with no
+     * Driver profile yet — legacy path, rarely applicable now) OR an
+     * email/password to create a brand new User account atomically with
+     * the Driver profile. The latter is the normal path: drivers don't
+     * self-register, so there's no other way for an admin to onboard one.
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'user_id' => 'required|exists:users,id',
+            'user_id' => 'nullable|exists:users,id',
+            'email' => 'nullable|required_without:user_id|email|unique:users,email',
+            'password' => ['nullable', 'required_without:user_id', 'confirmed', Password::min(8)],
             'first_name' => 'required|string',
             'last_name' => 'required|string',
             'phone_number' => 'required|string',
@@ -33,7 +45,30 @@ class DriverController extends Controller
             'status' => 'required|in:active,inactive,suspended',
         ]);
 
-        $driver = Driver::create($validated);
+        $driver = DB::transaction(function () use ($validated) {
+            $userId = $validated['user_id'] ?? null;
+
+            if (! $userId) {
+                $user = User::create([
+                    'name' => $validated['first_name'] . ' ' . $validated['last_name'],
+                    'email' => $validated['email'],
+                    'password' => Hash::make($validated['password']),
+                    'role' => 'driver',
+                ]);
+                $userId = $user->id;
+            }
+
+            return Driver::create([
+                'user_id' => $userId,
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'phone_number' => $validated['phone_number'],
+                'address' => $validated['address'] ?? null,
+                'license_number' => $validated['license_number'],
+                'hire_date' => $validated['hire_date'] ?? null,
+                'status' => $validated['status'],
+            ]);
+        });
 
         return response()->json($driver, 201);
     }

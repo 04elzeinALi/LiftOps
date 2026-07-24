@@ -3,7 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Passenger;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class PassengerController extends Controller
 {
@@ -30,6 +34,12 @@ class PassengerController extends Controller
 
     /**
      * Store a newly created resource in storage.
+     *
+     * Accepts EITHER an existing user_id (an already-created user with no
+     * Passenger profile yet — legacy path, rarely applicable now that
+     * self-registration creates both atomically) OR an email/password to
+     * create a brand new User account alongside the Passenger profile.
+     * The latter is how an admin onboards a passenger manually.
      */
     public function store(Request $request)
     {
@@ -39,21 +49,45 @@ class PassengerController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
+        // A passenger can only ever create their own profile, regardless of
+        // what user_id they send — merge it in before validation so the
+        // email/password-required-without-user_id rule below doesn't wrongly
+        // demand credentials for a passenger's own self-service create.
+        if ($user->role === 'passenger') {
+            $request->merge(['user_id' => $user->id]);
+        }
+
         $validated = $request->validate([
-            'user_id' => 'required|exists:users,id',
+            'user_id' => 'nullable|exists:users,id',
+            'email' => 'nullable|required_without:user_id|email|unique:users,email',
+            'password' => ['nullable', 'required_without:user_id', 'confirmed', Password::min(8)],
             'first_name' => 'required|string',
             'last_name' => 'required|string',
             'phone_number' => 'required|string',
             'status' => 'required|in:active,inactive,suspended',
         ]);
 
-        // A passenger can only ever create their own profile, regardless of
-        // what user_id they send in the body.
-        if ($user->role === 'passenger') {
-            $validated['user_id'] = $user->id;
-        }
+        $passenger = DB::transaction(function () use ($validated) {
+            $userId = $validated['user_id'] ?? null;
 
-        $passenger = Passenger::create($validated);
+            if (! $userId) {
+                $newUser = User::create([
+                    'name' => $validated['first_name'] . ' ' . $validated['last_name'],
+                    'email' => $validated['email'],
+                    'password' => Hash::make($validated['password']),
+                    'role' => 'passenger',
+                ]);
+                $userId = $newUser->id;
+            }
+
+            return Passenger::create([
+                'user_id' => $userId,
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'phone_number' => $validated['phone_number'],
+                'status' => $validated['status'],
+            ]);
+        });
 
         return response()->json($passenger, 201);
     }
