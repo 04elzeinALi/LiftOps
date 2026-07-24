@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Route;
+use App\Models\Station;
 
 class RouteController extends Controller
 {
@@ -12,24 +13,33 @@ class RouteController extends Controller
      */
     public function index()
     {
-        $routes = Route::paginate(15);
+        $routes = Route::with(['originStation', 'destinationStation'])->paginate(15);
 
         return $routes;
     }
 
     /**
      * Store a newly created resource in storage.
+     *
+     * origin/destination are picked from Stations, not free-typed — the
+     * FK is what keeps them live if a station is later renamed (see
+     * Route::origin()/destination() accessors). The text columns are
+     * still snapshotted at save time as a fallback for if the station is
+     * ever deleted (origin_station_id/destination_station_id null out).
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
             'route_name' => 'required|string',
-            'origin' => 'required|string',
-            'destination' => 'required|string',
+            'origin_station_id' => 'required|exists:stations,id',
+            'destination_station_id' => 'required|exists:stations,id',
             'distance_km' => 'required|numeric',
             'estimated_duration' => 'required|string',
             'fare' => 'required|numeric',
         ]);
+
+        $validated['origin'] = Station::findOrFail($validated['origin_station_id'])->station_name;
+        $validated['destination'] = Station::findOrFail($validated['destination_station_id'])->station_name;
 
         $route = Route::create($validated);
 
@@ -41,7 +51,7 @@ class RouteController extends Controller
      */
     public function show(string $id)
     {
-        $route = Route::findOrFail($id);
+        $route = Route::with(['originStation', 'destinationStation'])->findOrFail($id);
 
         return $route;
     }
@@ -53,12 +63,20 @@ class RouteController extends Controller
     {
         $validated = $request->validate([
             'route_name' => 'sometimes|required|string',
-            'origin' => 'sometimes|required|string',
-            'destination' => 'sometimes|required|string',
+            'origin_station_id' => 'sometimes|required|exists:stations,id',
+            'destination_station_id' => 'sometimes|required|exists:stations,id',
             'distance_km' => 'sometimes|required|numeric',
             'estimated_duration' => 'sometimes|required|string',
             'fare' => 'sometimes|required|numeric',
         ]);
+
+        if (isset($validated['origin_station_id'])) {
+            $validated['origin'] = Station::findOrFail($validated['origin_station_id'])->station_name;
+        }
+
+        if (isset($validated['destination_station_id'])) {
+            $validated['destination'] = Station::findOrFail($validated['destination_station_id'])->station_name;
+        }
 
         $route = Route::findOrFail($id);
         $route->update($validated);
