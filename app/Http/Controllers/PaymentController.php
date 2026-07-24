@@ -42,11 +42,22 @@ class PaymentController extends Controller
     {
         $period = $request->query('period', 'day');
 
-        [$start, $end] = match ($period) {
-            'week' => [now()->startOfWeek(), now()->endOfWeek()],
-            'month' => [now()->startOfMonth(), now()->endOfMonth()],
-            default => [now()->startOfDay(), now()->endOfDay()],
+        // Day/week/month boundaries are computed in the operator's local zone
+        // (config('app.display_timezone')) so "today" means the local calendar
+        // day, then converted to UTC to match how created_at is stored. Without
+        // this, the window was a UTC day shifted from the local one, so "today"
+        // bled into the previous local evening.
+        $tz = config('app.display_timezone');
+        $localNow = now($tz);
+
+        [$localStart, $localEnd] = match ($period) {
+            'week' => [$localNow->copy()->startOfWeek(), $localNow->copy()->endOfWeek()],
+            'month' => [$localNow->copy()->startOfMonth(), $localNow->copy()->endOfMonth()],
+            default => [$localNow->copy()->startOfDay(), $localNow->copy()->endOfDay()],
         };
+
+        $start = $localStart->copy()->utc();
+        $end = $localEnd->copy()->utc();
 
         $inPeriod = Payment::whereBetween('created_at', [$start, $end]);
 
@@ -73,8 +84,8 @@ class PaymentController extends Controller
 
         return response()->json([
             'period' => $period,
-            'start' => $start->toDateTimeString(),
-            'end' => $end->toDateTimeString(),
+            'start' => $localStart->toDateTimeString(),
+            'end' => $localEnd->toDateTimeString(),
             'total_billed' => (float) $totalBilled,
             'total_received' => (float) $totalReceived,
             'by_driver' => $byDriver,
