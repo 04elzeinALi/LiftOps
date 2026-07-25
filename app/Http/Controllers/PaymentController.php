@@ -102,7 +102,9 @@ class PaymentController extends Controller
         $validated = $request->validate([
             'travel_card_id' => 'required|exists:travel_cards,id',
             'payment_method' => 'required|in:cash,credit_card,bank_transfer,wish',
-            'payment_status' => 'required|in:unpaid,paid,failed',
+            // Optional: passengers never set it (derived from method below),
+            // and admin/driver default to 'unpaid' if they omit it.
+            'payment_status' => 'nullable|in:unpaid,paid,failed',
             'paid_at' => 'nullable|date',
             'collected_by_driver_id' => 'sometimes|nullable|exists:drivers,id',
         ]);
@@ -134,6 +136,9 @@ class PaymentController extends Controller
             $ownDriver = Driver::where('user_id', $user->id)->first();
             $validated['collected_by_driver_id'] = $ownDriver?->id;
         }
+
+        // Admin/driver default: an omitted status means unpaid.
+        $validated['payment_status'] = $validated['payment_status'] ?? 'unpaid';
 
         $travelCard = TravelCard::with('route')->findOrFail($validated['travel_card_id']);
     $validated['amount'] = $travelCard->calculatePrice();
