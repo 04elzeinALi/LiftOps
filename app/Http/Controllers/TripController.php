@@ -15,7 +15,7 @@ class TripController extends Controller
     public function index(Request $request)
     {
         $query = Trip::with(['schedule.route', 'bus', 'driver'])
-            ->withCount(['reservations as booked_reservations_count' => fn ($q) => $q->where('status', 'booked')]);
+            ->withCount(['reservations as booked_reservations_count' => fn ($q) => $q->where('status', 'booked'), 'boardings']);
 
         if ($request->user()->role === 'driver') {
             $query->whereHas('driver', fn ($q) => $q->where('user_id', $request->user()->id));
@@ -70,7 +70,7 @@ class TripController extends Controller
     public function show(string $id)
     {
         $trip = Trip::with(['schedule.route', 'bus', 'driver'])
-            ->withCount(['reservations as booked_reservations_count' => fn ($q) => $q->where('status', 'booked')])
+            ->withCount(['reservations as booked_reservations_count' => fn ($q) => $q->where('status', 'booked'), 'boardings'])
             ->findOrFail($id);
 
         return $trip;

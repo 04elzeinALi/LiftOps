@@ -118,6 +118,14 @@ class PaymentController extends Controller
             if (! $ownsCard) {
                 return response()->json(['message' => 'Forbidden'], 403);
             }
+
+            // Confirmation policy: a passenger can't freely mark a payment
+            // 'paid'. Online methods (card/bank/wish) act as an instant mock
+            // gateway and auto-confirm; cash starts 'unpaid' until a
+            // driver/admin confirms receipt. Whatever status the passenger
+            // sent is ignored here. Admin/driver keep the status they set.
+            $online = in_array($validated['payment_method'], ['credit_card', 'bank_transfer', 'wish']);
+            $validated['payment_status'] = $online ? 'paid' : 'unpaid';
         }
 
         // A driver's own payment is always attributed to themselves,
@@ -158,9 +166,20 @@ class PaymentController extends Controller
      */
     public function update(Request $request, string $id)
     {
-        $payment = Payment::findOrFail($id);
+        $user = $request->user();
+        $payment = Payment::with('travelCard.passenger')->findOrFail($id);
 
-        $this->authorizeWrite($request, $payment);
+        // Admin: full edit. Owning passenger: may edit their own payment but
+        // never mark it paid. Driver: may only confirm/adjust status (e.g.
+        // mark a cash payment received). Anyone else: forbidden.
+        $isAdmin = $user->role === 'admin';
+        $isOwningPassenger = $user->role === 'passenger'
+            && $payment->travelCard?->passenger?->user_id === $user->id;
+        $isDriver = $user->role === 'driver';
+
+        if (! $isAdmin && ! $isOwningPassenger && ! $isDriver) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
 
         $validated = $request->validate([
             'travel_card_id' => 'sometimes|required|exists:travel_cards,id',
@@ -170,9 +189,26 @@ class PaymentController extends Controller
             'collected_by_driver_id' => 'sometimes|nullable|exists:drivers,id',
         ]);
 
-        $travelCardID = $validated['travel_card_id'] ?? $payment->travel_card_id;
-        $travelCard = TravelCard::with('route')->findOrFail($travelCardID);
-        $validated['amount'] = $travelCard->calculatePrice();
+        // A passenger can never confirm a payment as paid (see store policy).
+        if ($isOwningPassenger) {
+            unset($validated['payment_status']);
+        }
+
+        // A driver may only touch status/confirmation fields — not reassign
+        // the card or rewrite the amount.
+        if ($isDriver) {
+            $validated = array_intersect_key(
+                $validated,
+                array_flip(['payment_status', 'paid_at', 'collected_by_driver_id'])
+            );
+        }
+
+        // Only recompute the amount when the card actually changes. A plain
+        // status toggle must NOT rewrite a historical amount at today's fare.
+        if (isset($validated['travel_card_id'])) {
+            $travelCard = TravelCard::with('route')->findOrFail($validated['travel_card_id']);
+            $validated['amount'] = $travelCard->calculatePrice();
+        }
 
         // Stamp paid_at when this update marks it paid and there's no time yet.
         if (($validated['payment_status'] ?? null) === 'paid' && empty($validated['paid_at']) && empty($payment->paid_at)) {

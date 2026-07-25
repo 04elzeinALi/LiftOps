@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Boarding;
 use App\Models\Driver;
 use App\Models\Passenger;
 use App\Models\Payment;
@@ -9,6 +10,7 @@ use App\Models\Reservation;
 use App\Models\TravelCard;
 use App\Models\Trip;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ReservationController extends Controller
 {
@@ -70,69 +72,26 @@ class ReservationController extends Controller
             $validated['passenger_id'] = $ownPassenger->id;
         }
 
-        $trip = Trip::with(['bus', 'schedule.route'])->findOrFail($validated['trip_id']);
+        // A new reservation is always a live booking.
+        $validated['status'] = 'booked';
 
-        // Business rule: can't reserve a seat on a trip that's no longer running.
-        if (in_array($trip->status, ['cancelled', 'completed'])) {
-            return response()->json([
-                'message' => 'This trip is no longer accepting reservations.',
-            ], 422);
-        }
+        // Serialize concurrent bookings on this trip so two requests can't
+        // both pass the capacity/seat checks and both insert (overbooking /
+        // double-booked seat race).
+        return DB::transaction(function () use ($validated) {
+            $trip = Trip::with(['bus', 'schedule.route'])->findOrFail($validated['trip_id']);
+            Reservation::where('trip_id', $trip->id)->lockForUpdate()->get();
 
-        $travelCard = TravelCard::findOrFail($validated['travel_card_id']);
+            $card = TravelCard::findOrFail($validated['travel_card_id']);
 
-        // Business rule: the travel card must be active and not expired.
-        if ($travelCard->status !== 'active' || $travelCard->expiry_date < now()->toDateString()) {
-            return response()->json([
-                'message' => 'This travel card is not active or has expired.',
-            ], 422);
-        }
+            if ($error = $this->reservationRuleError($trip, $card, (int) $validated['passenger_id'], (int) $validated['seat_number'])) {
+                return $error;
+            }
 
-        // Business rule: the travel card must be valid for this trip's route.
-        if ($travelCard->route_id !== $trip->schedule->route_id) {
-            return response()->json([
-                'message' => 'This travel card is not valid for this route.',
-            ], 422);
-        }
+            $reservation = Reservation::create($validated);
 
-        // Business rule: the travel card must have a confirmed (paid) payment
-        // before a reservation can be booked.
-        $hasPaid = Payment::where('travel_card_id', $validated['travel_card_id'])
-            ->where('payment_status', 'paid')
-            ->exists();
-
-        if (! $hasPaid) {
-            return response()->json([
-                'message' => 'Payment required: this travel card has no confirmed payment yet.',
-            ], 422);
-        }
-
-        // Business rule: can't overbook the bus.
-        $bookedSeats = Reservation::where('trip_id', $trip->id)
-            ->where('status', 'booked')
-            ->count();
-
-        if ($bookedSeats >= $trip->bus->capacity) {
-            return response()->json([
-                'message' => 'This trip is fully booked.',
-            ], 422);
-        }
-
-        // Business rule: no two passengers can hold the same seat on the same trip.
-        $seatTaken = Reservation::where('trip_id', $trip->id)
-            ->where('seat_number', $validated['seat_number'])
-            ->where('status', 'booked')
-            ->exists();
-
-        if ($seatTaken) {
-            return response()->json([
-                'message' => 'This seat is already reserved on this trip.',
-            ], 422);
-        }
-
-        $reservation = Reservation::create($validated);
-
-        return response()->json($reservation, 201);
+            return response()->json($reservation, 201);
+        });
     }
 
     /**
@@ -166,9 +125,110 @@ class ReservationController extends Controller
             'status' => 'sometimes|required|in:booked,cancelled,completed',
         ]);
 
+        // Effective values after the patch is applied.
+        $effective = array_merge($reservation->only([
+            'passenger_id', 'trip_id', 'travel_card_id', 'seat_number', 'status',
+        ]), $validated);
+
+        // Re-run the full booking ruleset whenever the reservation would
+        // remain (or become) a live booking — otherwise the edit path is a
+        // hole around every rule the create path enforces (moving to a full
+        // /cancelled trip, a taken seat, an expired/wrong/unpaid/other card).
+        if ($effective['status'] === 'booked') {
+            return DB::transaction(function () use ($reservation, $validated, $effective) {
+                $trip = Trip::with(['bus', 'schedule.route'])->findOrFail($effective['trip_id']);
+                Reservation::where('trip_id', $trip->id)->lockForUpdate()->get();
+
+                $card = TravelCard::findOrFail($effective['travel_card_id']);
+
+                if ($error = $this->reservationRuleError($trip, $card, (int) $effective['passenger_id'], (int) $effective['seat_number'], $reservation->id)) {
+                    return $error;
+                }
+
+                $reservation->update($validated);
+
+                return $reservation;
+            });
+        }
+
         $reservation->update($validated);
 
         return $reservation;
+    }
+
+    /**
+     * Returns a 422 response describing the first violated booking rule, or
+     * null if the reservation is allowed. Shared by store() and update() so
+     * both paths enforce the same invariants. Pass $excludeReservationId
+     * when updating so the reservation isn't counted against itself.
+     */
+    private function reservationRuleError(Trip $trip, TravelCard $card, int $passengerId, int $seatNumber, ?int $excludeReservationId = null)
+    {
+        if (in_array($trip->status, ['cancelled', 'completed'])) {
+            return response()->json(['message' => 'This trip is no longer accepting reservations.'], 422);
+        }
+
+        if ($card->status !== 'active' || $card->expiry_date < now()->toDateString()) {
+            return response()->json(['message' => 'This travel card is not active or has expired.'], 422);
+        }
+
+        if ($card->route_id !== $trip->schedule->route_id) {
+            return response()->json(['message' => 'This travel card is not valid for this route.'], 422);
+        }
+
+        // The card must belong to the passenger doing the booking — you can't
+        // ride on someone else's card.
+        if ((int) $card->passenger_id !== $passengerId) {
+            return response()->json(['message' => 'This travel card does not belong to this passenger.'], 422);
+        }
+
+        $hasPaid = Payment::where('travel_card_id', $card->id)
+            ->where('payment_status', 'paid')
+            ->exists();
+
+        if (! $hasPaid) {
+            return response()->json(['message' => 'Payment required: this travel card has no confirmed payment yet.'], 422);
+        }
+
+        if ($seatNumber < 1 || $seatNumber > $trip->bus->capacity) {
+            return response()->json(['message' => 'Invalid seat number for this bus.'], 422);
+        }
+
+        // A card can't hold more live (booked) reservations than it has
+        // remaining trips — otherwise a 1-trip card could reserve many seats.
+        $bookedOnCard = Reservation::where('travel_card_id', $card->id)
+            ->where('status', 'booked')
+            ->when($excludeReservationId, fn ($q) => $q->where('id', '!=', $excludeReservationId))
+            ->count();
+
+        if ($bookedOnCard >= $card->remaining_trips) {
+            return response()->json(['message' => 'This travel card has no remaining trips.'], 422);
+        }
+
+        // Capacity counts booked reservations AND boardings together — a
+        // reserved rider who boards has their reservation marked completed
+        // (see BoardingController), so the two sets never double-count.
+        $occupied = Reservation::where('trip_id', $trip->id)
+            ->where('status', 'booked')
+            ->when($excludeReservationId, fn ($q) => $q->where('id', '!=', $excludeReservationId))
+            ->count()
+            + Boarding::where('trip_id', $trip->id)->count();
+
+        if ($occupied >= $trip->bus->capacity) {
+            return response()->json(['message' => 'This trip is fully booked.'], 422);
+        }
+
+        $seatTaken = Reservation::where('trip_id', $trip->id)
+            ->where('seat_number', $seatNumber)
+            ->where('status', 'booked')
+            ->when($excludeReservationId, fn ($q) => $q->where('id', '!=', $excludeReservationId))
+            ->exists();
+
+        if ($seatTaken) {
+            return response()->json(['message' => 'This seat is already reserved on this trip.'], 422);
+        }
+
+        return null;
     }
 
     /**

@@ -40,16 +40,19 @@ class Trip extends Model
     }
 
     /**
-     * Seats left to reserve on this trip's bus. Not stored — computed from
-     * the bus's capacity minus how many booked reservations already exist,
-     * matching the same count ReservationController::store() enforces.
-     * Uses the eager-loaded booked_reservations_count when present
-     * (withCount) to avoid an N+1 query per row on list endpoints.
+     * Seats left on this trip's bus. Not stored — capacity minus occupancy,
+     * where occupancy = booked reservations + boardings (a rider who boards
+     * has their reservation marked completed, so the two sets never
+     * double-count). Matches what Reservation/Boarding controllers enforce.
+     * Uses eager-loaded *_count values when present (withCount) to avoid an
+     * N+1 per row on list endpoints.
      */
     protected function availableSeats(): Attribute
     {
         return Attribute::make(
-            get: fn () => max(0, $this->bus->capacity - ($this->booked_reservations_count ?? $this->reservations()->where('status', 'booked')->count())),
+            get: fn () => max(0, $this->bus->capacity
+                - ($this->booked_reservations_count ?? $this->reservations()->where('status', 'booked')->count())
+                - ($this->boardings_count ?? $this->boardings()->count())),
         );
     }
 }

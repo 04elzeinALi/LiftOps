@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\Boarding;
 use App\Models\Driver;
 use App\Models\Passenger;
+use App\Models\Reservation;
 use App\Models\TravelCard;
 use App\Models\Trip;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class BoardingController extends Controller
 {
@@ -53,8 +55,6 @@ class BoardingController extends Controller
             'boarded_at' => 'required|date',
         ]);
 
-        $trip = Trip::with('bus')->findOrFail($validated['trip_id']);
-
         // A passenger can only board using their own profile/card.
         if ($user->role === 'passenger') {
             $ownPassenger = Passenger::where('user_id', $user->id)->firstOrFail();
@@ -65,52 +65,91 @@ class BoardingController extends Controller
         // for a trip they are actually assigned to drive.
         if ($user->role === 'driver') {
             $ownDriver = Driver::where('user_id', $user->id)->first();
+            $targetTrip = Trip::find($validated['trip_id']);
 
-            if (! $ownDriver || $trip->driver_id !== $ownDriver->id) {
+            if (! $ownDriver || ! $targetTrip || $targetTrip->driver_id !== $ownDriver->id) {
                 return response()->json([
                     'message' => 'Forbidden: you are not the driver for this trip.',
                 ], 403);
             }
         }
 
-        // Business rule: can't board a trip that's no longer running.
+        // Serialize concurrent boardings on this trip (capacity race).
+        return DB::transaction(function () use ($validated) {
+            $trip = Trip::with('bus')->findOrFail($validated['trip_id']);
+            Boarding::where('trip_id', $trip->id)->lockForUpdate()->get();
+
+            $card = TravelCard::findOrFail($validated['travel_card_id']);
+
+            if ($error = $this->boardingRuleError($trip, $card, (int) $validated['passenger_id'], $validated['reservation_id'] ?? null)) {
+                return $error;
+            }
+
+            $boarding = Boarding::create($validated);
+
+            // A boarding consumes its linked reservation so that seat stops
+            // counting as a live booking (keeps reservations + boardings from
+            // double-counting the same rider against capacity).
+            if (! empty($validated['reservation_id'])) {
+                Reservation::where('id', $validated['reservation_id'])
+                    ->where('trip_id', $trip->id)
+                    ->where('status', 'booked')
+                    ->update(['status' => 'completed']);
+            }
+
+            return response()->json($boarding, 201);
+        });
+    }
+
+    /**
+     * Returns a 422 response for the first violated boarding rule, or null.
+     * Shared by store() and update(). Pass $excludeBoardingId on update so
+     * the boarding isn't counted against itself.
+     */
+    private function boardingRuleError(Trip $trip, TravelCard $card, int $passengerId, $reservationId, ?int $excludeBoardingId = null)
+    {
         if (in_array($trip->status, ['cancelled', 'completed'])) {
-            return response()->json([
-                'message' => 'This trip is no longer accepting boardings.',
-            ], 422);
+            return response()->json(['message' => 'This trip is no longer accepting boardings.'], 422);
         }
 
-        $travelCard = TravelCard::findOrFail($validated['travel_card_id']);
-
-        // Business rule: the travel card must be active and not expired.
-        if ($travelCard->status !== 'active' || $travelCard->expiry_date < now()->toDateString()) {
-            return response()->json([
-                'message' => 'This travel card is not active or has expired.',
-            ], 422);
+        if ($card->status !== 'active' || $card->expiry_date < now()->toDateString()) {
+            return response()->json(['message' => 'This travel card is not active or has expired.'], 422);
         }
 
-        // Business rule: a travel card can only be used while it still has
-        // remaining trips. remaining = total_trips - number of boardings so far.
-        $usedTrips = Boarding::where('travel_card_id', $travelCard->id)->count();
-
-        if ($usedTrips >= $travelCard->total_trips) {
-            return response()->json([
-                'message' => 'This travel card has no remaining trips.',
-            ], 422);
+        if ((int) $card->passenger_id !== $passengerId) {
+            return response()->json(['message' => 'This travel card does not belong to this passenger.'], 422);
         }
 
-        // Business rule: can't board more passengers than the bus can hold.
-        $currentBoardings = Boarding::where('trip_id', $trip->id)->count();
+        // remaining = total_trips − boardings already made on the card.
+        $usedTrips = Boarding::where('travel_card_id', $card->id)
+            ->when($excludeBoardingId, fn ($q) => $q->where('id', '!=', $excludeBoardingId))
+            ->count();
 
-        if ($currentBoardings >= $trip->bus->capacity) {
-            return response()->json([
-                'message' => 'This trip is at full capacity.',
-            ], 422);
+        if ($usedTrips >= $card->total_trips) {
+            return response()->json(['message' => 'This travel card has no remaining trips.'], 422);
         }
 
-        $boarding = Boarding::create($validated);
+        // A boarding that converts an existing booked reservation on this
+        // trip doesn't add occupancy (that seat is already counted). A
+        // walk-up boarding must fit the remaining capacity.
+        $convertsReservation = $reservationId
+            && Reservation::where('id', $reservationId)
+                ->where('trip_id', $trip->id)
+                ->where('status', 'booked')
+                ->exists();
 
-        return response()->json($boarding, 201);
+        if (! $convertsReservation) {
+            $occupied = Reservation::where('trip_id', $trip->id)->where('status', 'booked')->count()
+                + Boarding::where('trip_id', $trip->id)
+                    ->when($excludeBoardingId, fn ($q) => $q->where('id', '!=', $excludeBoardingId))
+                    ->count();
+
+            if ($occupied >= $trip->bus->capacity) {
+                return response()->json(['message' => 'This trip is at full capacity.'], 422);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -142,9 +181,27 @@ class BoardingController extends Controller
             'boarded_at' => 'sometimes|required|date',
         ]);
 
-        $boarding->update($validated);
+        $effective = array_merge($boarding->only([
+            'trip_id', 'travel_card_id', 'passenger_id', 'reservation_id',
+        ]), $validated);
 
-        return $boarding;
+        // Re-run the ruleset so the edit path can't move a boarding onto a
+        // cancelled/full trip or an invalid/other card (the create path's
+        // checks would otherwise be bypassed).
+        return DB::transaction(function () use ($boarding, $validated, $effective) {
+            $trip = Trip::with('bus')->findOrFail($effective['trip_id']);
+            Boarding::where('trip_id', $trip->id)->lockForUpdate()->get();
+
+            $card = TravelCard::findOrFail($effective['travel_card_id']);
+
+            if ($error = $this->boardingRuleError($trip, $card, (int) $effective['passenger_id'], $effective['reservation_id'] ?? null, $boarding->id)) {
+                return $error;
+            }
+
+            $boarding->update($validated);
+
+            return $boarding;
+        });
     }
 
     /**
