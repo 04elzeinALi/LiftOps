@@ -123,6 +123,20 @@ class PassengerController extends Controller
             'status' => 'required|in:active,inactive,suspended',
         ]);
 
+        // On the "link existing account" path (admin linking, or a passenger
+        // self-creating with their own id), the target must be a passenger
+        // account without a profile yet — blocks double-linking and attaching
+        // a passenger profile to a driver/admin account.
+        if (! empty($validated['user_id'])) {
+            $targetUser = User::findOrFail($validated['user_id']);
+            if ($targetUser->role !== 'passenger') {
+                return response()->json(['message' => 'The selected user is not a passenger account.'], 422);
+            }
+            if ($targetUser->passenger()->exists()) {
+                return response()->json(['message' => 'This user already has a passenger profile.'], 422);
+            }
+        }
+
         $passenger = DB::transaction(function () use ($validated) {
             $userId = $validated['user_id'] ?? null;
 
@@ -199,6 +213,17 @@ class PassengerController extends Controller
         $passenger = Passenger::findOrFail($id);
 
         $this->authorizeOwnership($request, $passenger);
+
+        // Block instead of cascade: deleting a passenger used to silently
+        // wipe their travel cards, payments, reservations and boardings —
+        // i.e. the financial/booking history the app exists to track.
+        if ($passenger->travelCards()->exists()
+            || $passenger->reservations()->exists()
+            || $passenger->boardings()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete this passenger while they still have travel cards, reservations, or boardings. Remove those first.',
+            ], 409);
+        }
 
         $passenger->delete();
 

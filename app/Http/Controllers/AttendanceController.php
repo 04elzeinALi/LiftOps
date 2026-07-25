@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Attendance;
 use App\Models\Driver;
+use App\Models\Trip;
 use Illuminate\Http\Request;
 
 class AttendanceController extends Controller
@@ -47,10 +48,23 @@ class AttendanceController extends Controller
             'status' => 'required|in:present,absent,late',
         ]);
 
-        // A driver can only check themselves in/out.
+        // A driver can only check themselves in/out, and only against a
+        // trip they are actually assigned to (not any arbitrary trip_id).
         if ($user->role === 'driver') {
             $ownDriver = Driver::where('user_id', $user->id)->firstOrFail();
             $validated['driver_id'] = $ownDriver->id;
+
+            if (! empty($validated['trip_id'])) {
+                $ownsTrip = Trip::where('id', $validated['trip_id'])
+                    ->where('driver_id', $ownDriver->id)
+                    ->exists();
+
+                if (! $ownsTrip) {
+                    return response()->json([
+                        'message' => 'You can only log attendance for your own trips.',
+                    ], 403);
+                }
+            }
         }
 
         $attendance = Attendance::create($validated);

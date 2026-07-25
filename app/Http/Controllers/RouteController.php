@@ -90,6 +90,16 @@ class RouteController extends Controller
     public function destroy(string $id)
     {
         $route = Route::findOrFail($id);
+
+        // Block instead of cascade: deleting a route used to cascade through
+        // schedules → trips → reservations/boardings, and travel cards →
+        // payments — wiping booking and financial history.
+        if ($route->schedules()->exists() || $route->travelCards()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete this route while schedules or travel cards still reference it. Remove those first.',
+            ], 409);
+        }
+
         $route->delete();
 
         return response()->json(['message' => 'Route deleted successfully']);

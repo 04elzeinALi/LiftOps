@@ -92,6 +92,20 @@ class DriverController extends Controller
             'status' => 'required|in:active,inactive,suspended',
         ]);
 
+        // On the "link existing account" path, the target must be a driver
+        // account that doesn't already have a profile — otherwise you could
+        // double-link one user or attach a driver profile to an admin/
+        // passenger account (there's no DB unique constraint to catch it).
+        if (! empty($validated['user_id'])) {
+            $targetUser = User::findOrFail($validated['user_id']);
+            if ($targetUser->role !== 'driver') {
+                return response()->json(['message' => 'The selected user is not a driver account.'], 422);
+            }
+            if ($targetUser->driver()->exists()) {
+                return response()->json(['message' => 'This user already has a driver profile.'], 422);
+            }
+        }
+
         $driver = DB::transaction(function () use ($validated) {
             $userId = $validated['user_id'] ?? null;
 
@@ -167,6 +181,15 @@ class DriverController extends Controller
     public function destroy(string $id)
     {
         $driver = Driver::findOrFail($id);
+
+        // Block instead of cascade: deleting a driver used to cascade-delete
+        // all their trips and every reservation/boarding on them.
+        if ($driver->trips()->exists() || $driver->attendances()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete this driver while they still have trips or attendance records. Reassign or remove those first.',
+            ], 409);
+        }
+
         $driver->delete();
 
         return response()->json(['message' => 'Driver deleted successfully']);
