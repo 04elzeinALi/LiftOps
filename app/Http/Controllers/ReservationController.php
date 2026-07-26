@@ -60,7 +60,6 @@ class ReservationController extends Controller
             'passenger_id' => 'required|exists:passengers,id',
             'trip_id' => 'required|exists:trips,id',
             'travel_card_id' => 'required|exists:travel_cards,id',
-            'seat_number' => 'required|integer',
             'pickup_location' => 'nullable|string',
             'reservation_time' => 'required|date',
             'status' => 'required|in:booked,cancelled,completed',
@@ -84,7 +83,7 @@ class ReservationController extends Controller
 
             $card = TravelCard::findOrFail($validated['travel_card_id']);
 
-            if ($error = $this->reservationRuleError($trip, $card, (int) $validated['passenger_id'], (int) $validated['seat_number'])) {
+            if ($error = $this->reservationRuleError($trip, $card, (int) $validated['passenger_id'])) {
                 return $error;
             }
 
@@ -119,7 +118,6 @@ class ReservationController extends Controller
             'passenger_id' => 'sometimes|required|exists:passengers,id',
             'trip_id' => 'sometimes|required|exists:trips,id',
             'travel_card_id' => 'sometimes|required|exists:travel_cards,id',
-            'seat_number' => 'sometimes|required|integer',
             'pickup_location' => 'nullable|string',
             'reservation_time' => 'sometimes|required|date',
             'status' => 'sometimes|required|in:booked,cancelled,completed',
@@ -127,7 +125,7 @@ class ReservationController extends Controller
 
         // Effective values after the patch is applied.
         $effective = array_merge($reservation->only([
-            'passenger_id', 'trip_id', 'travel_card_id', 'seat_number', 'status',
+            'passenger_id', 'trip_id', 'travel_card_id', 'status',
         ]), $validated);
 
         // Re-run the full booking ruleset whenever the reservation would
@@ -141,7 +139,7 @@ class ReservationController extends Controller
 
                 $card = TravelCard::findOrFail($effective['travel_card_id']);
 
-                if ($error = $this->reservationRuleError($trip, $card, (int) $effective['passenger_id'], (int) $effective['seat_number'], $reservation->id)) {
+                if ($error = $this->reservationRuleError($trip, $card, (int) $effective['passenger_id'], $reservation->id)) {
                     return $error;
                 }
 
@@ -162,7 +160,7 @@ class ReservationController extends Controller
      * both paths enforce the same invariants. Pass $excludeReservationId
      * when updating so the reservation isn't counted against itself.
      */
-    private function reservationRuleError(Trip $trip, TravelCard $card, int $passengerId, int $seatNumber, ?int $excludeReservationId = null)
+    private function reservationRuleError(Trip $trip, TravelCard $card, int $passengerId, ?int $excludeReservationId = null)
     {
         if (in_array($trip->status, ['cancelled', 'completed'])) {
             return response()->json(['message' => 'This trip is no longer accepting reservations.'], 422);
@@ -190,10 +188,6 @@ class ReservationController extends Controller
             return response()->json(['message' => 'Payment required: this travel card has no confirmed payment yet.'], 422);
         }
 
-        if ($seatNumber < 1 || $seatNumber > $trip->bus->capacity) {
-            return response()->json(['message' => 'Invalid seat number for this bus.'], 422);
-        }
-
         // A card can't hold more live (booked) reservations than it has
         // remaining trips — otherwise a 1-trip card could reserve many seats.
         $bookedOnCard = Reservation::where('travel_card_id', $card->id)
@@ -216,16 +210,6 @@ class ReservationController extends Controller
 
         if ($occupied >= $trip->bus->capacity) {
             return response()->json(['message' => 'This trip is fully booked.'], 422);
-        }
-
-        $seatTaken = Reservation::where('trip_id', $trip->id)
-            ->where('seat_number', $seatNumber)
-            ->where('status', 'booked')
-            ->when($excludeReservationId, fn ($q) => $q->where('id', '!=', $excludeReservationId))
-            ->exists();
-
-        if ($seatTaken) {
-            return response()->json(['message' => 'This seat is already reserved on this trip.'], 422);
         }
 
         return null;
