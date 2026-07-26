@@ -44,8 +44,12 @@ class TripController extends Controller
             'trip_date' => 'required|date',
             'actual_departure' => 'nullable|date',
             'actual_arrival' => 'nullable|date',
-            'status' => 'required|in:scheduled,ongoing,completed,cancelled',
         ]);
+
+        // A brand-new trip is always 'scheduled'. Status transitions
+        // (ongoing/completed/cancelled/emergency) happen later via update(),
+        // so it isn't chosen at creation time.
+        $validated['status'] = 'scheduled';
 
         // Business rule: only an in-service bus and an active driver can
         // be assigned to a trip.
