@@ -16,7 +16,16 @@ class PaymentController extends Controller
     {
         $user = $request->user();
 
-        $query = Payment::with(['travelCard.passenger', 'collectedByDriver']);
+        $query = Payment::with([
+            'travelCard.passenger',
+            'collectedByDriver',
+            // The card's latest live booking, with its trip's driver — used to
+            // fill "Collected By" with the trip driver's name (see below).
+            'travelCard.reservations' => fn ($q) => $q
+                ->where('status', 'booked')
+                ->orderByDesc('reservation_time')
+                ->with('trip.driver'),
+        ]);
 
         // A passenger only sees payments on their own cards. Drivers see
         // everything (no trip_id on this table to scope by) so they can
@@ -28,7 +37,48 @@ class PaymentController extends Controller
             );
         }
 
-        return $query->paginate(15);
+        // Optional period filter (day/week/month) so the admin can view just
+        // the payments made today / this week / this month instead of all of
+        // them. Same local-timezone window as the summary endpoint.
+        if ($request->filled('period')) {
+            [$start, $end] = $this->periodWindow($request->query('period'));
+            $query->whereBetween('created_at', [$start, $end]);
+        }
+
+        $payments = $query->latest()->paginate(15);
+
+        // Attach the driver of the card's most recent booked trip so the UI
+        // can show it in the "Collected By" column. A card can span several
+        // trips/drivers, so "most recent booked" is the meaningful one.
+        $payments->getCollection()->transform(function ($payment) {
+            $driver = $payment->travelCard?->reservations?->first()?->trip?->driver;
+            $payment->trip_driver_name = $driver
+                ? trim($driver->first_name . ' ' . $driver->last_name)
+                : null;
+
+            return $payment;
+        });
+
+        return $payments;
+    }
+
+    /**
+     * Resolve a period keyword (day/week/month) to a [startUtc, endUtc] window
+     * computed in the operator's local timezone. Shared by index() and
+     * summary() so "today" means the same local calendar day in both.
+     */
+    private function periodWindow(string $period): array
+    {
+        $tz = config('app.display_timezone');
+        $localNow = now($tz);
+
+        [$localStart, $localEnd] = match ($period) {
+            'week' => [$localNow->copy()->startOfWeek(), $localNow->copy()->endOfWeek()],
+            'month' => [$localNow->copy()->startOfMonth(), $localNow->copy()->endOfMonth()],
+            default => [$localNow->copy()->startOfDay(), $localNow->copy()->endOfDay()],
+        };
+
+        return [$localStart->copy()->utc(), $localEnd->copy()->utc()];
     }
 
     /**
@@ -43,21 +93,10 @@ class PaymentController extends Controller
         $period = $request->query('period', 'day');
 
         // Day/week/month boundaries are computed in the operator's local zone
-        // (config('app.display_timezone')) so "today" means the local calendar
-        // day, then converted to UTC to match how created_at is stored. Without
-        // this, the window was a UTC day shifted from the local one, so "today"
-        // bled into the previous local evening.
-        $tz = config('app.display_timezone');
-        $localNow = now($tz);
-
-        [$localStart, $localEnd] = match ($period) {
-            'week' => [$localNow->copy()->startOfWeek(), $localNow->copy()->endOfWeek()],
-            'month' => [$localNow->copy()->startOfMonth(), $localNow->copy()->endOfMonth()],
-            default => [$localNow->copy()->startOfDay(), $localNow->copy()->endOfDay()],
-        };
-
-        $start = $localStart->copy()->utc();
-        $end = $localEnd->copy()->utc();
+        // (see periodWindow) then converted to UTC to match how created_at is
+        // stored. Without this, the window was a UTC day shifted from the local
+        // one, so "today" bled into the previous local evening.
+        [$start, $end] = $this->periodWindow($period);
 
         $inPeriod = Payment::whereBetween('created_at', [$start, $end]);
 
@@ -84,8 +123,8 @@ class PaymentController extends Controller
 
         return response()->json([
             'period' => $period,
-            'start' => $localStart->toDateTimeString(),
-            'end' => $localEnd->toDateTimeString(),
+            'start' => $start->toDateTimeString(),
+            'end' => $end->toDateTimeString(),
             'total_billed' => (float) $totalBilled,
             'total_received' => (float) $totalReceived,
             'by_driver' => $byDriver,
