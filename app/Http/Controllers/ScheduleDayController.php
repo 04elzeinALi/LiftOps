@@ -24,12 +24,22 @@ class ScheduleDayController extends Controller
     {
         $validated = $request->validate([
             'schedule_id' => 'required|exists:schedules,id',
-            'day_of_week' => 'required|in:monday,tuesday,wednesday,thursday,friday,saturday,sunday',
+            'days' => 'required|array|min:1',
+            'days.*' => 'in:monday,tuesday,wednesday,thursday,friday,saturday,sunday',
         ]);
 
-        $scheduleDay = ScheduleDay::create($validated);
+        // One row per selected day (the "Every day" option just sends all
+        // seven). firstOrCreate skips any day already on this schedule so a
+        // re-submit never creates duplicates.
+        $created = collect($validated['days'])
+            ->unique()
+            ->map(fn ($day) => ScheduleDay::firstOrCreate([
+                'schedule_id' => $validated['schedule_id'],
+                'day_of_week' => $day,
+            ]))
+            ->values();
 
-        return response()->json($scheduleDay, 201);
+        return response()->json($created, 201);
     }
 
     /**
