@@ -14,7 +14,7 @@ class TripController extends Controller
      */
     public function index(Request $request)
     {
-        $query = Trip::with(['schedule.route.originStation', 'schedule.route.destinationStation', 'bus', 'driver'])
+        $query = Trip::with(['schedule.route.originStation', 'schedule.route.destinationStation', 'shift.route.originStation', 'shift.route.destinationStation', 'bus', 'driver'])
             ->withCount(['reservations as booked_reservations_count' => fn ($q) => $q->where('status', 'booked'), 'boardings']);
 
         if ($request->user()->role === 'driver') {
@@ -73,7 +73,7 @@ class TripController extends Controller
      */
     public function show(string $id)
     {
-        $trip = Trip::with(['schedule.route.originStation', 'schedule.route.destinationStation', 'bus', 'driver'])
+        $trip = Trip::with(['schedule.route.originStation', 'schedule.route.destinationStation', 'shift.route.originStation', 'shift.route.destinationStation', 'bus', 'driver'])
             ->withCount(['reservations as booked_reservations_count' => fn ($q) => $q->where('status', 'booked'), 'boardings'])
             ->findOrFail($id);
 
@@ -122,6 +122,11 @@ class TripController extends Controller
             'bus_id' => 'sometimes|required|exists:buses,id',
             'driver_id' => 'sometimes|required|exists:drivers,id',
             'trip_date' => 'sometimes|required|date',
+            // A leg's own planned times. Editable so an admin can nudge a
+            // single leg without reshaping the whole shift around it — note a
+            // later shift edit re-derives these from the shift's window.
+            'departure_time' => 'sometimes|nullable|date_format:H:i',
+            'arrival_time' => 'sometimes|nullable|date_format:H:i',
             'actual_departure' => 'nullable|date',
             'actual_arrival' => 'nullable|date',
             'status' => 'sometimes|required|in:scheduled,ongoing,completed,cancelled,emergency',
