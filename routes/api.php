@@ -9,6 +9,7 @@ use App\Http\Controllers\PassengerController;
 use App\Http\Controllers\DriverController;
 use App\Http\Controllers\ScheduleController;
 use App\Http\Controllers\ScheduleDayController;
+use App\Http\Controllers\ShiftController;
 use App\Http\Controllers\TravelCardController;
 use App\Http\Controllers\TripController;
 use App\Http\Controllers\ReservationController;
@@ -67,6 +68,14 @@ Route::middleware('auth:sanctum')->group(function () {
         // admin views are declared explicitly here.
         Route::get('drivers/{driver}/activity', [DriverController::class, 'activity']);
         Route::get('passengers/{passenger}/activity', [PassengerController::class, 'activity']);
+    });
+
+    // Shifts: a driver's working day on a route, which generates the trips
+    // (legs) it runs. Drivers read their own and may move only the status;
+    // everything else is admin-only (see ShiftController).
+    Route::apiResource('shifts', ShiftController::class)->only(['index', 'show', 'update']);
+    Route::middleware('role:admin')->group(function () {
+        Route::apiResource('shifts', ShiftController::class)->only(['store', 'destroy']);
     });
 
     // Trips: any authenticated user can view; drivers may update only their

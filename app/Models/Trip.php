@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
-#[Fillable(['schedule_id','bus_id','driver_id','trip_date','actual_departure','actual_arrival','status'])]
+#[Fillable(['schedule_id','shift_id','round_number','direction','bus_id','driver_id','trip_date','departure_time','arrival_time','actual_departure','actual_arrival','status'])]
 class Trip extends Model
 {
     use HasFactory;
@@ -17,6 +17,37 @@ class Trip extends Model
        public function schedule()
     {
         return $this->belongsTo(Schedule::class);
+    }
+    public function shift()
+    {
+        return $this->belongsTo(Shift::class);
+    }
+
+    /**
+     * A trip's route comes from its shift now. Trips created under the old
+     * timetable have no shift, so they still read it off their schedule.
+     */
+    public function getRouteAttribute()
+    {
+        return $this->shift?->route ?? $this->schedule?->route;
+    }
+
+    /**
+     * Times live on the trip itself now. Trips predating shifts kept theirs on
+     * the schedule, so fall back to that rather than showing nothing.
+     */
+    protected function departureTime(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value) => $value ?? $this->schedule?->departure_time,
+        );
+    }
+
+    protected function arrivalTime(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value) => $value ?? $this->schedule?->arrival_time,
+        );
     }
         public function bus()
     {
