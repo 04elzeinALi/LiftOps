@@ -51,7 +51,15 @@ class RouteController extends Controller
      */
     public function show(string $id)
     {
-        $route = Route::with(['originStation', 'destinationStation'])->findOrFail($id);
+        // The ordered stop list drives the route diagram (and, later, the
+        // distance between any two stops), so it is always loaded in
+        // station_order — the order the bus actually calls at them.
+        $route = Route::with([
+            'originStation',
+            'destinationStation',
+            'routeStations' => fn ($q) => $q->orderBy('station_order'),
+            'routeStations.station',
+        ])->findOrFail($id);
 
         return $route;
     }

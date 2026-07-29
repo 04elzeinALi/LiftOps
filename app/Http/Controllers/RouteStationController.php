@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\RouteStation;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class RouteStationController extends Controller
 {
@@ -18,6 +19,37 @@ class RouteStationController extends Controller
     }
 
     /**
+     * Rewrite a route's whole stop sequence in one go.
+     *
+     * The stop order is what the route diagram draws and (later) what the
+     * distance between two stops is measured along, so it is replaced
+     * wholesale from an ordered list of station ids rather than patched one
+     * row at a time — inside a transaction, so a half-applied reorder can't
+     * leave two stops sharing a position.
+     */
+    public function reorder(Request $request)
+    {
+        $validated = $request->validate([
+            'route_id' => 'required|exists:routes,id',
+            'station_ids' => 'required|array|min:1',
+            'station_ids.*' => 'integer|exists:stations,id',
+        ]);
+
+        DB::transaction(function () use ($validated) {
+            foreach ($validated['station_ids'] as $index => $stationId) {
+                RouteStation::where('route_id', $validated['route_id'])
+                    ->where('station_id', $stationId)
+                    ->update(['station_order' => $index + 1]);
+            }
+        });
+
+        return RouteStation::with('station')
+            ->where('route_id', $validated['route_id'])
+            ->orderBy('station_order')
+            ->get();
+    }
+
+    /**
      * Store a newly created resource in storage.
      *
      * route_stations uses a composite primary key (route_id, station_id),
@@ -28,8 +60,12 @@ class RouteStationController extends Controller
         $validated = $request->validate([
             'route_id' => 'required|exists:routes,id',
             'station_id' => 'required|exists:stations,id',
-            'station_order' => 'required|integer',
+            // Optional: omitted means "append to the end of the route", which
+            // is what adding a stop from the sequence editor wants.
+            'station_order' => 'sometimes|integer',
         ]);
+
+        $validated['station_order'] ??= 1 + (int) RouteStation::where('route_id', $validated['route_id'])->max('station_order');
 
         // Prevent adding the same station to the same route twice.
         $exists = RouteStation::where('route_id', $validated['route_id'])

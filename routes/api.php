@@ -56,6 +56,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('maintenance', MaintenanceController::class);
         Route::get('route-stations', [RouteStationController::class, 'index']);
         Route::post('route-stations', [RouteStationController::class, 'store']);
+        Route::put('route-stations/reorder', [RouteStationController::class, 'reorder']);
         Route::delete('route-stations', [RouteStationController::class, 'destroy']);
         // Must be registered before the payments apiResource below, or
         // "summary" gets swallowed by the payments/{payment} show route.
