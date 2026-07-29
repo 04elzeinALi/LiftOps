@@ -57,6 +57,36 @@ class Route extends Model
     }
 
     /**
+     * Roads curve between stops, so summing straight lines from stop to stop
+     * systematically undershoots how far the bus actually drives — measured
+     * end to end the coastal line came out ~7% short. This detour index
+     * scales the measurement back up to approximate road distance, which
+     * matters because the fare is banded on it: without it a Beirut-Saida
+     * trip measured 39.4km and slipped under the 40km line as a short trip.
+     */
+    public const ROAD_FACTOR = 1.1;
+
+    /** Trips at or beyond this many km cost the long-trip fare. */
+    public const LONG_TRIP_KM = 40;
+    public const SHORT_TRIP_FARE = 2.0;
+    public const LONG_TRIP_FARE = 3.0;
+
+    /**
+     * What one ride between two stops on this route costs, before any
+     * travel-card multiplier. Null if either station isn't on this route.
+     */
+    public function fareBetweenStations(int $fromStationId, int $toStationId): ?float
+    {
+        $km = $this->distanceBetweenStations($fromStationId, $toStationId);
+
+        if ($km === null) {
+            return null;
+        }
+
+        return $km < self::LONG_TRIP_KM ? self::SHORT_TRIP_FARE : self::LONG_TRIP_FARE;
+    }
+
+    /**
      * The stops this route calls at, in call order.
      */
     public function orderedStops()
@@ -119,7 +149,7 @@ class Route extends Model
             );
         }
 
-        return $km;
+        return $km * self::ROAD_FACTOR;
     }
 
     /**
