@@ -20,7 +20,17 @@ class BoardingController extends Controller
     {
         $user = $request->user();
 
-        $query = Boarding::with(['trip', 'reservation', 'passenger', 'travelCard']);
+        // The driver's manifest reads all of this: who boarded, where they got
+        // on and off, and how to reach them.
+        $query = Boarding::with([
+            'trip',
+            'reservation',
+            'passenger',
+            'travelCard.fromStation',
+            'travelCard.toStation',
+            'fromStation',
+            'toStation',
+        ]);
 
         if ($user->role === 'passenger') {
             $query->whereHas('passenger', fn ($q) => $q->where('user_id', $user->id));
@@ -37,7 +47,9 @@ class BoardingController extends Controller
             $query->where('trip_id', $request->query('trip_id'));
         }
 
-        return $query->paginate(15);
+        // Boarding order is the useful order on a bus — the driver reads the
+        // manifest as the queue of who got on, earliest first.
+        return $query->orderBy('boarded_at')->paginate(15);
     }
 
     /**
@@ -52,6 +64,10 @@ class BoardingController extends Controller
             'reservation_id' => 'nullable|exists:reservations,id',
             'passenger_id' => 'required|exists:passengers,id',
             'travel_card_id' => 'required|exists:travel_cards,id',
+            // Where this rider got on and off. Omitted means "the whole segment
+            // their card covers", which is the normal case for a reservation.
+            'from_station_id' => 'sometimes|nullable|exists:stations,id',
+            'to_station_id' => 'sometimes|nullable|exists:stations,id',
             'boarded_at' => 'required|date',
         ]);
 
@@ -84,6 +100,12 @@ class BoardingController extends Controller
             if ($error = $this->boardingRuleError($trip, $card, (int) $validated['passenger_id'], $validated['reservation_id'] ?? null)) {
                 return $error;
             }
+
+            // Default the segment to the one the card was bought for, so a
+            // rider boarding on a reservation doesn't have to restate it and
+            // the manifest still shows where they're travelling.
+            $validated['from_station_id'] = $validated['from_station_id'] ?? $card->from_station_id;
+            $validated['to_station_id'] = $validated['to_station_id'] ?? $card->to_station_id;
 
             $boarding = Boarding::create($validated);
 

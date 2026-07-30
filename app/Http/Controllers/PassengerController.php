@@ -74,8 +74,26 @@ class PassengerController extends Controller
     {
         $user = $request->user();
 
+        // A driver needs to find the rider standing in front of them, but has
+        // no business browsing every passenger's phone number. So: a search
+        // term is required, and results are capped to a handful.
         if ($user->role === 'driver') {
-            return response()->json(['message' => 'Forbidden'], 403);
+            $term = trim((string) $request->query('search', ''));
+
+            if (mb_strlen($term) < 3) {
+                return response()->json([
+                    'message' => 'Enter at least 3 characters to look up a passenger.',
+                ], 422);
+            }
+
+            return Passenger::query()
+                ->where(fn ($q) => $q
+                    ->where('phone_number', 'like', "%{$term}%")
+                    ->orWhere('first_name', 'like', "%{$term}%")
+                    ->orWhere('last_name', 'like', "%{$term}%"))
+                ->orderBy('first_name')
+                ->limit(10)
+                ->get(['id', 'first_name', 'last_name', 'phone_number', 'status']);
         }
 
         $query = Passenger::with('user');
@@ -101,8 +119,11 @@ class PassengerController extends Controller
     {
         $user = $request->user();
 
+        // Drivers may open an account for a walk-up rider who boards without
+        // one — they can only create a brand-new account, never attach a
+        // profile to an existing user, which stays an admin action.
         if ($user->role === 'driver') {
-            return response()->json(['message' => 'Forbidden'], 403);
+            $request->merge(['user_id' => null]);
         }
 
         // A passenger can only ever create their own profile, regardless of
