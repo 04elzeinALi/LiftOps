@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use App\Models\Passenger;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -22,44 +23,60 @@ class AuthController extends Controller
      * endpoint used to trust a client-sent `role`.)
      */
     public function register(Request $request)
-{
-    $validated = $request->validate([
-        'first_name' => 'required|string',
-        'last_name' => 'required|string',
-        'email' => 'required|email|unique:users',
-        'phone_number' => 'required|string',
-        'password' => ['required', 'confirmed', Password::min(8)],
-    ]);
+    {
+        try {
+            $validated = $request->validate([
+                'first_name' => 'required|string|max:255',
+                'last_name' => 'required|string|max:255',
+                'email' => 'required|email|unique:users,email',
+                'phone_number' => 'required|string|max:20',
+                'password' => ['required', 'confirmed', Password::min(8)],
+            ]);
 
-    $user = DB::transaction(function () use ($validated) {
-        $user = User::create([
-            'name' => $validated['first_name'] . ' ' . $validated['last_name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role' => 'passenger',
-        ]);
+            $user = DB::transaction(function () use ($validated) {
+                $user = User::create([
+                    'name' => $validated['first_name'] . ' ' . $validated['last_name'],
+                    'email' => $validated['email'],
+                    'password' => Hash::make($validated['password']),
+                    'role' => 'passenger',
+                ]);
 
-        Passenger::create([
-            'user_id' => $user->id,
-            'first_name' => $validated['first_name'],
-            'last_name' => $validated['last_name'],
-            'phone_number' => $validated['phone_number'],
-            'status' => 'active',
-        ]);
+                Passenger::create([
+                    'user_id' => $user->id,
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'phone_number' => $validated['phone_number'],
+                    'status' => 'active',
+                ]);
 
-        return $user;
-    });
+                return $user;
+            });
 
-    $token = $user->createToken('auth_token')->plainTextToken;
+            $token = $user->createToken('auth_token')->plainTextToken;
 
-    return response()->json([
-        'message' => 'Registration successful.',
-        'data' => [
-            'user' => $user,
-            'token' => $token,
-        ],
-    ], 201);
-}
+            return response()->json([
+                'message' => 'Registration successful.',
+                'data' => [
+                    'user' => $user,
+                    'token' => $token,
+                ],
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Registration failed.',
+                'errors' => [
+                    'server' => [$e->getMessage()],
+                ],
+            ], 500);
+        }
+    }
 
 public function login(Request $request)
 {
