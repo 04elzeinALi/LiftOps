@@ -37,12 +37,15 @@ class PaymentController extends Controller
             );
         }
 
-        // Optional period filter (day/week/month) so the admin can view just
-        // the payments made today / this week / this month instead of all of
-        // them. Same local-timezone window as the summary endpoint.
+        // Optional period filter (day/week/month/year/all) so the admin can
+        // view just the payments made in that window instead of all of them.
+        // Same local-timezone window as the summary endpoint. "all" resolves
+        // to no bounds, so it's simply not applied.
         if ($request->filled('period')) {
-            [$start, $end] = $this->periodWindow($request->query('period'));
-            $query->whereBetween('created_at', [$start, $end]);
+            $window = $this->periodWindow($request->query('period'));
+            if ($window) {
+                $query->whereBetween('created_at', $window);
+            }
         }
 
         $payments = $query->latest()->paginate(15);
@@ -63,18 +66,25 @@ class PaymentController extends Controller
     }
 
     /**
-     * Resolve a period keyword (day/week/month) to a [startUtc, endUtc] window
-     * computed in the operator's local timezone. Shared by index() and
-     * summary() so "today" means the same local calendar day in both.
+     * Resolve a period keyword (day/week/month/year/all) to a [startUtc,
+     * endUtc] window computed in the operator's local timezone. Shared by
+     * index() and summary() so "today" means the same local calendar day in
+     * both. "all" has no window at all — null tells the caller to skip the
+     * date filter entirely rather than pass some arbitrarily wide range.
      */
-    private function periodWindow(string $period): array
+    private function periodWindow(string $period): ?array
     {
+        if ($period === 'all') {
+            return null;
+        }
+
         $tz = config('app.display_timezone');
         $localNow = now($tz);
 
         [$localStart, $localEnd] = match ($period) {
             'week' => [$localNow->copy()->startOfWeek(), $localNow->copy()->endOfWeek()],
             'month' => [$localNow->copy()->startOfMonth(), $localNow->copy()->endOfMonth()],
+            'year' => [$localNow->copy()->startOfYear(), $localNow->copy()->endOfYear()],
             default => [$localNow->copy()->startOfDay(), $localNow->copy()->endOfDay()],
         };
 
@@ -92,19 +102,25 @@ class PaymentController extends Controller
     {
         $period = $request->query('period', 'day');
 
-        // Day/week/month boundaries are computed in the operator's local zone
-        // (see periodWindow) then converted to UTC to match how created_at is
-        // stored. Without this, the window was a UTC day shifted from the local
-        // one, so "today" bled into the previous local evening.
-        [$start, $end] = $this->periodWindow($period);
+        // Day/week/month/year boundaries are computed in the operator's local
+        // zone (see periodWindow) then converted to UTC to match how
+        // created_at is stored. Without this, the window was a UTC day
+        // shifted from the local one, so "today" bled into the previous local
+        // evening. "all" has no window — the queries below simply go unfiltered.
+        $window = $this->periodWindow($period);
 
-        $inPeriod = Payment::whereBetween('created_at', [$start, $end]);
+        $inPeriod = Payment::query();
+        $driverQuery = Payment::whereNotNull('collected_by_driver_id');
+
+        if ($window) {
+            $inPeriod->whereBetween('created_at', $window);
+            $driverQuery->whereBetween('created_at', $window);
+        }
 
         $totalBilled = (clone $inPeriod)->sum('amount');
         $totalReceived = (clone $inPeriod)->where('payment_status', 'paid')->sum('amount');
 
-        $driverRows = Payment::whereBetween('created_at', [$start, $end])
-            ->whereNotNull('collected_by_driver_id')
+        $driverRows = $driverQuery
             ->selectRaw('collected_by_driver_id, SUM(amount) as billed, SUM(CASE WHEN payment_status = "paid" THEN amount ELSE 0 END) as received')
             ->groupBy('collected_by_driver_id')
             ->get();
@@ -123,8 +139,8 @@ class PaymentController extends Controller
 
         return response()->json([
             'period' => $period,
-            'start' => $start->toDateTimeString(),
-            'end' => $end->toDateTimeString(),
+            'start' => $window ? $window[0]->toDateTimeString() : null,
+            'end' => $window ? $window[1]->toDateTimeString() : null,
             'total_billed' => (float) $totalBilled,
             'total_received' => (float) $totalReceived,
             'by_driver' => $byDriver,
