@@ -18,6 +18,8 @@ class PaymentController extends Controller
 
         $query = Payment::with([
             'travelCard.passenger',
+            'travelCard.fromStation',
+            'travelCard.toStation',
             'collectedByDriver',
             // The card's latest live booking, with its trip's driver — used to
             // fill "Collected By" with the trip driver's name (see below).
