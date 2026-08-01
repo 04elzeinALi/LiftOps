@@ -78,7 +78,7 @@ class ReservationController extends Controller
         // both pass the capacity/seat checks and both insert (overbooking /
         // double-booked seat race).
         return DB::transaction(function () use ($validated) {
-            $trip = Trip::with(['bus', 'schedule.route'])->findOrFail($validated['trip_id']);
+            $trip = Trip::with(['bus', 'schedule.route', 'shift.route'])->findOrFail($validated['trip_id']);
             Reservation::where('trip_id', $trip->id)->lockForUpdate()->get();
 
             $card = TravelCard::findOrFail($validated['travel_card_id']);
@@ -134,7 +134,7 @@ class ReservationController extends Controller
         // /cancelled trip, a taken seat, an expired/wrong/unpaid/other card).
         if ($effective['status'] === 'booked') {
             return DB::transaction(function () use ($reservation, $validated, $effective) {
-                $trip = Trip::with(['bus', 'schedule.route'])->findOrFail($effective['trip_id']);
+                $trip = Trip::with(['bus', 'schedule.route', 'shift.route'])->findOrFail($effective['trip_id']);
                 Reservation::where('trip_id', $trip->id)->lockForUpdate()->get();
 
                 $card = TravelCard::findOrFail($effective['travel_card_id']);
@@ -170,7 +170,11 @@ class ReservationController extends Controller
             return response()->json(['message' => 'This travel card is not active or has expired.'], 422);
         }
 
-        if ($card->route_id !== $trip->schedule->route_id) {
+        // A trip's route comes from its shift now, falling back to the old
+        // schedule for trips that predate shifts (see Trip::getRouteAttribute).
+        // Reading ->schedule->route_id directly crashed every booking once
+        // trips became shift legs, since a leg's schedule_id is null.
+        if ($card->route_id !== $trip->route?->id) {
             return response()->json(['message' => 'This travel card is not valid for this route.'], 422);
         }
 

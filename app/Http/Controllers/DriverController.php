@@ -42,7 +42,7 @@ class DriverController extends Controller
         $start = Carbon::parse($date, $tz)->startOfDay()->utc();
         $end = Carbon::parse($date, $tz)->endOfDay()->utc();
 
-        $trips = Trip::with(['schedule.route', 'bus'])
+        $trips = Trip::with(['schedule.route', 'shift.route', 'bus'])
             ->where('driver_id', $driver->id)
             ->whereDate('trip_date', $date)
             ->get();
@@ -53,7 +53,7 @@ class DriverController extends Controller
             ->latest()
             ->get();
 
-        $attendance = Attendance::with('trip.schedule.route')
+        $attendance = Attendance::with(['trip.schedule.route', 'trip.shift.route'])
             ->where('driver_id', $driver->id)
             ->whereBetween('check_in', [$start, $end])
             ->latest('check_in')
