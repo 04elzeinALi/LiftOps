@@ -99,14 +99,33 @@ class TravelCard extends Model
 
     /**
      * How many trips are left on this card. Not stored — computed from
-     * total_trips minus how many times it has actually been used to board.
-     * Uses the eager-loaded boardings_count when present (withCount) to
-     * avoid an N+1 query per row on list endpoints.
+     * total_trips minus how many are spoken for.
+     *
+     * A trip counts against the card the moment it's booked, not only once
+     * boarded — a passenger who books 3 trips off a 5-trip card expects to
+     * see 2 left, not wait until they've physically ridden 3. So "spoken
+     * for" is every live-or-completed reservation on this card, plus any
+     * walk-up boarding with no reservation behind it. A boarded reservation
+     * is excluded from the boarding side of that sum (its own boarding row
+     * has reservation_id set) so it isn't counted twice — see
+     * BoardingController::store(), which flips the reservation to
+     * 'completed' in the same request that creates its boarding.
+     *
+     * Uses the eager-loaded *_count aliases when present (withCount) to
+     * avoid two extra queries per row on list endpoints.
      */
     protected function remainingTrips(): Attribute
     {
         return Attribute::make(
-            get: fn () => max(0, $this->total_trips - ($this->boardings_count ?? $this->boardings()->count())),
+            get: function () {
+                $consumedByReservation = $this->consumed_reservations_count
+                    ?? $this->reservations()->whereIn('status', ['booked', 'completed'])->count();
+
+                $consumedByWalkUp = $this->walkup_boardings_count
+                    ?? $this->boardings()->whereNull('reservation_id')->count();
+
+                return max(0, $this->total_trips - $consumedByReservation - $consumedByWalkUp);
+            },
         );
     }
 

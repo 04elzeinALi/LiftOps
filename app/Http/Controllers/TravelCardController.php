@@ -48,7 +48,11 @@ class TravelCardController extends Controller
     {
         $user = $request->user();
 
-        $query = TravelCard::with(['passenger', 'route', 'fromStation', 'toStation'])->withCount('boardings');
+        $query = TravelCard::with(['passenger', 'route', 'fromStation', 'toStation'])
+            ->withCount([
+                'reservations as consumed_reservations_count' => fn ($q) => $q->whereIn('status', ['booked', 'completed']),
+                'boardings as walkup_boardings_count' => fn ($q) => $q->whereNull('reservation_id'),
+            ]);
 
         // A passenger only sees their own cards. Drivers see everything
         // (no trip_id on this table to scope by) so they can check a

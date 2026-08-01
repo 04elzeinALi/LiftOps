@@ -192,14 +192,20 @@ class ReservationController extends Controller
             return response()->json(['message' => 'Payment required: this travel card has no confirmed payment yet.'], 422);
         }
 
-        // A card can't hold more live (booked) reservations than it has
-        // remaining trips — otherwise a 1-trip card could reserve many seats.
-        $bookedOnCard = Reservation::where('travel_card_id', $card->id)
-            ->where('status', 'booked')
+        // A trip counts against the card the moment it's booked, matching
+        // TravelCard::remainingTrips() (see there for why: booking, not just
+        // boarding, is what a passenger expects to spend a trip). Computed
+        // directly here rather than read off remaining_trips, so
+        // $excludeReservationId can correctly leave out the very reservation
+        // being edited — otherwise re-saving your own last live reservation
+        // would count it against itself and always look "full."
+        $consumed = Reservation::where('travel_card_id', $card->id)
+            ->whereIn('status', ['booked', 'completed'])
             ->when($excludeReservationId, fn ($q) => $q->where('id', '!=', $excludeReservationId))
-            ->count();
+            ->count()
+            + Boarding::where('travel_card_id', $card->id)->whereNull('reservation_id')->count();
 
-        if ($bookedOnCard >= $card->remaining_trips) {
+        if ($consumed >= $card->total_trips) {
             return response()->json(['message' => 'This travel card has no remaining trips.'], 422);
         }
 
