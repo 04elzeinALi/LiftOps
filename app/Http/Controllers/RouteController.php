@@ -36,6 +36,7 @@ class RouteController extends Controller
             'distance_km' => 'required|numeric',
             'estimated_duration' => 'required|string',
             'fare' => 'required|numeric',
+            'manual_fare' => 'nullable|numeric',
         ]);
 
         $validated['origin'] = Station::findOrFail($validated['origin_station_id'])->station_name;
@@ -76,6 +77,7 @@ class RouteController extends Controller
             'distance_km' => 'sometimes|required|numeric',
             'estimated_duration' => 'sometimes|required|string',
             'fare' => 'sometimes|required|numeric',
+            'manual_fare' => 'sometimes|nullable|numeric',
         ]);
 
         if (isset($validated['origin_station_id'])) {

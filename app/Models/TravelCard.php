@@ -62,6 +62,13 @@ class TravelCard extends Model
             return 0.0;
         }
 
+        // An admin-set price overrides the distance calculation entirely —
+        // this is the escape hatch for routes that shouldn't be banded
+        // automatically (promos, negotiated rates, corrections).
+        if ($route->manual_fare !== null) {
+            return (float) $route->manual_fare;
+        }
+
         if ($this->from_station_id && $this->to_station_id) {
             $fare = $route->fareBetweenStations(
                 (int) $this->from_station_id,
