@@ -20,6 +20,8 @@ use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\RouteStationController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\PricingSettingController;
+use App\Http\Controllers\CashBoardingController;
 
 
 
@@ -45,8 +47,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('stations', StationController::class)->only(['index', 'show']);
     Route::apiResource('routes', RouteController::class)->only(['index', 'show']);
 
+    // Read-only for any authenticated user: drivers and passengers need the
+    // current distance/fare bands to preview a price before it's charged
+    // (see Route::fareForKm()). Only admins may change them, below.
+    Route::get('pricing-settings', [PricingSettingController::class, 'show']);
+
     // admin-only management resources
     Route::middleware('role:admin')->group(function () {
+        Route::put('pricing-settings', [PricingSettingController::class, 'update']);
         Route::apiResource('buses', BusController::class);
         Route::apiResource('stations', StationController::class)->only(['store', 'update', 'destroy']);
         Route::apiResource('routes', RouteController::class)->only(['store', 'update', 'destroy']);
@@ -92,6 +100,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('travel-cards', TravelCardController::class);
     Route::apiResource('reservations', ReservationController::class);
     Route::apiResource('boardings', BoardingController::class);
+    Route::apiResource('cash-boardings', CashBoardingController::class)->only(['index', 'show', 'store', 'destroy']);
     Route::apiResource('payments', PaymentController::class);
     Route::apiResource('attendance', AttendanceController::class);
 });

@@ -37,6 +37,12 @@ class RouteController extends Controller
             'estimated_duration' => 'required|string',
             'fare' => 'required|numeric',
             'manual_fare' => 'nullable|numeric',
+            // This route's own distance bands. All three together or none —
+            // see Route::fareForKm(), which won't mix a route's threshold
+            // with the network's fares.
+            'long_trip_km' => 'nullable|numeric|min:0.1|required_with:short_trip_fare,long_trip_fare',
+            'short_trip_fare' => 'nullable|numeric|min:0|required_with:long_trip_km,long_trip_fare',
+            'long_trip_fare' => 'nullable|numeric|min:0|required_with:long_trip_km,short_trip_fare',
         ]);
 
         $validated['origin'] = Station::findOrFail($validated['origin_station_id'])->station_name;
@@ -78,6 +84,9 @@ class RouteController extends Controller
             'estimated_duration' => 'sometimes|required|string',
             'fare' => 'sometimes|required|numeric',
             'manual_fare' => 'sometimes|nullable|numeric',
+            'long_trip_km' => 'sometimes|nullable|numeric|min:0.1|required_with:short_trip_fare,long_trip_fare',
+            'short_trip_fare' => 'sometimes|nullable|numeric|min:0|required_with:long_trip_km,long_trip_fare',
+            'long_trip_fare' => 'sometimes|nullable|numeric|min:0|required_with:long_trip_km,short_trip_fare',
         ]);
 
         if (isset($validated['origin_station_id'])) {

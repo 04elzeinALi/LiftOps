@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 
-#[Fillable(['route_name', 'origin','destination','origin_station_id','destination_station_id','distance_km','estimated_duration','fare','manual_fare'])]
+#[Fillable(['route_name', 'origin','destination','origin_station_id','destination_station_id','distance_km','estimated_duration','fare','manual_fare','long_trip_km','short_trip_fare','long_trip_fare'])]
 
 class Route extends Model
 {
@@ -66,10 +66,50 @@ class Route extends Model
      */
     public const ROAD_FACTOR = 1.1;
 
-    /** Trips at or beyond this many km cost the long-trip fare. */
-    public const LONG_TRIP_KM = 40;
-    public const SHORT_TRIP_FARE = 2.0;
-    public const LONG_TRIP_FARE = 3.0;
+    /**
+     * What THIS route charges for a ride of $km, before any travel-card
+     * multiplier. Resolution order, most specific first:
+     *
+     *   1. the route's own bands, if it has been given a full set
+     *   2. the network-wide defaults in pricing_settings
+     *
+     * The three band columns are treated as one unit rather than falling
+     * back field by field: a route with only its threshold set would
+     * otherwise silently mix its own distance line with the global fares,
+     * which is a pricing bug nobody would think to look for.
+     *
+     * A route's manual_fare, where set, skips distance banding altogether
+     * and is applied before any of this — see TravelCard::baseFare().
+     *
+     * Shared by fareBetweenStations() below and TravelCard::baseFare()'s
+     * no-segment fallback, so both price a given distance identically.
+     */
+    public function fareForKm(float $km): float
+    {
+        $threshold = $this->long_trip_km;
+        $short = $this->short_trip_fare;
+        $long = $this->long_trip_fare;
+
+        if ($threshold === null || $short === null || $long === null) {
+            $settings = PricingSetting::current();
+            $threshold = $settings->long_trip_km;
+            $short = $settings->short_trip_fare;
+            $long = $settings->long_trip_fare;
+        }
+
+        return $km < (float) $threshold ? (float) $short : (float) $long;
+    }
+
+    /**
+     * True when this route prices on its own bands rather than the network
+     * defaults — used by the admin UI to show which of the two is in effect.
+     */
+    public function hasOwnPricing(): bool
+    {
+        return $this->long_trip_km !== null
+            && $this->short_trip_fare !== null
+            && $this->long_trip_fare !== null;
+    }
 
     /**
      * What one ride between two stops on this route costs, before any
@@ -83,7 +123,7 @@ class Route extends Model
             return null;
         }
 
-        return $km < self::LONG_TRIP_KM ? self::SHORT_TRIP_FARE : self::LONG_TRIP_FARE;
+        return $this->fareForKm($km);
     }
 
     /**

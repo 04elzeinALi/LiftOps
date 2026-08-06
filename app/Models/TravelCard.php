@@ -87,9 +87,7 @@ class TravelCard extends Model
             return (float) $route->fare;
         }
 
-        return $route->totalDistanceKm() < Route::LONG_TRIP_KM
-            ? Route::SHORT_TRIP_FARE
-            : Route::LONG_TRIP_FARE;
+        return $route->fareForKm($route->totalDistanceKm());
     }
 
     public function calculatePrice(): float

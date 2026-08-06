@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bus;
+use App\Models\Maintenance;
 use Illuminate\Http\Request;
 
 class BusController extends Controller
@@ -61,7 +62,25 @@ class BusController extends Controller
         ]);
 
         $bus = Bus::findOrFail($id);
+
+        // A bus that just went INTO maintenance (not one that was already
+        // there) gets an open maintenance record automatically, so the admin
+        // doesn't have to remember to go create one — they land on the
+        // Maintenance page and fill in the type/cost/description from there.
+        // Type and scheduled date aren't known yet at this point, so they
+        // start as a placeholder ('other', today) rather than guessing.
+        $enteringMaintenance = ($validated['status'] ?? null) === 'maintenance' && $bus->status !== 'maintenance';
+
         $bus->update($validated);
+
+        if ($enteringMaintenance) {
+            Maintenance::create([
+                'bus_id' => $bus->id,
+                'maintenance_type' => 'other',
+                'maintenance_status' => 'scheduled',
+                'scheduled_at' => now()->toDateString(),
+            ]);
+        }
 
         return $bus;
     }
