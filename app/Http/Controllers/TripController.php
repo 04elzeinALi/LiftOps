@@ -29,6 +29,18 @@ class TripController extends Controller
             $query->where('status', $request->query('status'));
         }
 
+        // Group a shift's segments together and in running order, so the
+        // admin list reads as "this shift, then its segments" rather than an
+        // interleaved pile of every trip. Newest day first, since that's what
+        // an admin is usually looking for.
+        $query->orderByDesc('trip_date')
+            ->orderBy('shift_id')
+            ->orderBy('round_number')
+            // outbound before inbound within a round: 'outbound' sorts after
+            // 'inbound' alphabetically, so order explicitly rather than by name.
+            ->orderByRaw("FIELD(direction, 'outbound', 'inbound')")
+            ->orderBy('departure_time');
+
         return $query->paginate(15);
     }
 
