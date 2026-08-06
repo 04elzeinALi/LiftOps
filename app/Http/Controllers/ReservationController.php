@@ -21,7 +21,7 @@ class ReservationController extends Controller
     {
         $user = $request->user();
 
-        $query = Reservation::with(['passenger', 'trip.schedule.route', 'trip.shift.route', 'travelCard.fromStation', 'travelCard.toStation']);
+        $query = Reservation::with(['passenger', 'trip.schedule.route.originStation', 'trip.schedule.route.destinationStation', 'trip.shift.route.originStation', 'trip.shift.route.destinationStation', 'travelCard.fromStation', 'travelCard.toStation']);
 
         if ($user->role === 'passenger') {
             $query->whereHas('passenger', fn ($q) => $q->where('user_id', $user->id));
@@ -98,7 +98,7 @@ class ReservationController extends Controller
      */
     public function show(Request $request, string $id)
     {
-        $reservation = Reservation::with(['passenger', 'trip.schedule.route', 'trip.shift.route', 'travelCard.fromStation', 'travelCard.toStation'])->findOrFail($id);
+        $reservation = Reservation::with(['passenger', 'trip.schedule.route.originStation', 'trip.schedule.route.destinationStation', 'trip.shift.route.originStation', 'trip.shift.route.destinationStation', 'travelCard.fromStation', 'travelCard.toStation'])->findOrFail($id);
 
         $this->authorizeView($request, $reservation);
 
