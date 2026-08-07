@@ -51,8 +51,12 @@ class TravelCard extends Model
      *
      * Cards sold before segments existed (or whose stations were since removed
      * from the route) have no segment to measure, and fall back to the route's
-     * end-to-end fare — the most expensive reading, never the cheapest, so the
-     * fallback can't be used to underpay.
+     * end-to-end distance instead — the longest reading, never the shortest,
+     * so the fallback can't be used to underpay.
+     *
+     * Every reading resolves through the route's own pricing (see
+     * Route::fareForKm), so one route is priced one way no matter which of
+     * these paths a card takes.
      */
     public function baseFare(): float
     {
@@ -80,13 +84,10 @@ class TravelCard extends Model
             }
         }
 
-        // A route with no stop sequence has nothing to measure along, so fall
-        // back to its own flat fare column — which is exactly what cards on
-        // the older per-segment routes were sold at.
-        if ($route->orderedStops()->count() < 2) {
-            return (float) $route->fare;
-        }
-
+        // A route with no stop sequence has nothing to measure along, so this
+        // comes out as 0km and lands in the route's short band. That used to
+        // read the flat `fare` column instead, but every route now carries its
+        // own bands, so answering from them keeps one route priced one way.
         return $route->fareForKm($route->totalDistanceKm());
     }
 

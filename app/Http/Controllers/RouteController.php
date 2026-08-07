@@ -35,7 +35,6 @@ class RouteController extends Controller
             'destination_station_id' => 'required|exists:stations,id',
             'distance_km' => 'required|numeric',
             'estimated_duration' => 'required|string',
-            'fare' => 'required|numeric',
             'manual_fare' => 'nullable|numeric',
             // This route's own distance bands. All three together or none —
             // see Route::fareForKm(), which won't mix a route's threshold
@@ -82,7 +81,6 @@ class RouteController extends Controller
             'destination_station_id' => 'sometimes|required|exists:stations,id',
             'distance_km' => 'sometimes|required|numeric',
             'estimated_duration' => 'sometimes|required|string',
-            'fare' => 'sometimes|required|numeric',
             'manual_fare' => 'sometimes|nullable|numeric',
             'long_trip_km' => 'sometimes|nullable|numeric|min:0.1|required_with:short_trip_fare,long_trip_fare',
             'short_trip_fare' => 'sometimes|nullable|numeric|min:0|required_with:long_trip_km,long_trip_fare',
