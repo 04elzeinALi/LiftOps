@@ -25,6 +25,14 @@ class TripController extends Controller
             $query->whereDate('trip_date', $request->query('trip_date'));
         }
 
+        // Everything from this date onward. A passenger browsing trips to book
+        // has no use for ones that already ran, and the caller passes its own
+        // local date rather than the server's — "today" is the passenger's
+        // today, not the server timezone's.
+        if ($request->filled('from_date')) {
+            $query->whereDate('trip_date', '>=', $request->query('from_date'));
+        }
+
         if ($request->filled('status')) {
             $query->where('status', $request->query('status'));
         }

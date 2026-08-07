@@ -9,12 +9,24 @@ class StationController extends Controller
 {
     /**
      * Display a listing of the resource.
+     *
+     * Searching is done here rather than in the browser because the list is
+     * paginated: filtering the current page client-side would hide every
+     * match that happens to live on page 2.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $stations = Station::paginate(15);
+        $query = Station::query();
 
-        return $stations;
+        if ($request->filled('search')) {
+            $term = $request->query('search');
+            // Escape the LIKE wildcards so a station name containing % or _
+            // is searched for literally instead of matching everything.
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $term);
+            $query->where('station_name', 'like', "%{$escaped}%");
+        }
+
+        return $query->orderBy('station_name')->paginate(15);
     }
 
     /**
