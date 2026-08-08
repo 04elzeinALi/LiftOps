@@ -119,11 +119,12 @@ class PassengerController extends Controller
     {
         $user = $request->user();
 
-        // Drivers may open an account for a walk-up rider who boards without
-        // one — they can only create a brand-new account, never attach a
-        // profile to an existing user, which stays an admin action.
+        // A driver can find and board an existing rider, or take a walk-up
+        // rider as a cash customer (see CashBoardingController) — but opening
+        // a new account is an admin/self-service action, not something a
+        // driver does on someone else's behalf.
         if ($user->role === 'driver') {
-            $request->merge(['user_id' => null]);
+            abort(response()->json(['message' => 'Forbidden'], 403));
         }
 
         // A passenger can only ever create their own profile, regardless of
