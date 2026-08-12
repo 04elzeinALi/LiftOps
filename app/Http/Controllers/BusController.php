@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bus;
-use App\Models\Maintenance;
 use Illuminate\Http\Request;
 
 class BusController extends Controller
@@ -21,6 +20,11 @@ class BusController extends Controller
     /**
      * Store a newly created resource in storage.
      */
+    /**
+     * Store a newly created resource in storage.
+     *
+     * 'maintenance' is not accepted here — see update() for why.
+     */
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -29,7 +33,7 @@ class BusController extends Controller
             'model' => 'required|string',
             'production_year' => 'required|integer',
             'capacity' => 'required|integer',
-            'status' => 'required|in:in_service,out_of_service,maintenance',
+            'status' => 'required|in:in_service,out_of_service',
         ]);
 
         $bus = Bus::create($validated);
@@ -49,6 +53,16 @@ class BusController extends Controller
 
     /**
      * Update the specified resource in storage.
+     *
+     * 'maintenance' is deliberately not an accepted status here. A bus is put
+     * into and taken out of maintenance by its maintenance records alone (see
+     * MaintenanceController), so there is exactly one writer of that fact and
+     * the two can't drift apart — previously a bus could be flipped out of
+     * maintenance here while an open repair record still said otherwise, or
+     * left stranded in maintenance after its repair was completed.
+     *
+     * A bus already under maintenance keeps that status: its other fields stay
+     * editable, and a request that omits `status` leaves it untouched.
      */
     public function update(Request $request, string $id)
     {
@@ -58,29 +72,21 @@ class BusController extends Controller
             'model' => 'sometimes|required|string',
             'production_year' => 'sometimes|required|integer',
             'capacity' => 'sometimes|required|integer',
-            'status' => 'sometimes|required|in:in_service,out_of_service,maintenance',
+            'status' => 'sometimes|required|in:in_service,out_of_service',
         ]);
 
         $bus = Bus::findOrFail($id);
 
-        // A bus that just went INTO maintenance (not one that was already
-        // there) gets an open maintenance record automatically, so the admin
-        // doesn't have to remember to go create one — they land on the
-        // Maintenance page and fill in the type/cost/description from there.
-        // Type and scheduled date aren't known yet at this point, so they
-        // start as a placeholder ('other', today) rather than guessing.
-        $enteringMaintenance = ($validated['status'] ?? null) === 'maintenance' && $bus->status !== 'maintenance';
+        // Changing a under-maintenance bus back to in/out of service has to go
+        // through its maintenance record, or the record would be left open
+        // describing a bus that is no longer being repaired.
+        if ($bus->status === 'maintenance' && isset($validated['status'])) {
+            return response()->json([
+                'message' => 'This bus is under maintenance. Close its maintenance record to change its status.',
+            ], 422);
+        }
 
         $bus->update($validated);
-
-        if ($enteringMaintenance) {
-            Maintenance::create([
-                'bus_id' => $bus->id,
-                'maintenance_type' => 'other',
-                'maintenance_status' => 'scheduled',
-                'scheduled_at' => now()->toDateString(),
-            ]);
-        }
 
         return $bus;
     }

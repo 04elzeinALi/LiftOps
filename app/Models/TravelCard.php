@@ -45,6 +45,35 @@ class TravelCard extends Model
     }
 
     /**
+     * A card past its expiry date reads as 'expired' whatever the stored
+     * column says, so the admin list can't show "Active" on a card nobody can
+     * use. The date is the fact; the column is just what someone last typed.
+     *
+     * 'suspended' is left alone — that's a deliberate administrative action,
+     * and hiding it behind "expired" would lose the reason the card was
+     * stopped.
+     *
+     * Read-only shaping: writes still store exactly what was set, and the
+     * booking rules in ReservationController/BoardingController check the
+     * date independently, so this changes what's *displayed*, never whether
+     * a card is honoured.
+     */
+    protected function status(): Attribute
+    {
+        return Attribute::make(
+            get: function ($value) {
+                if ($value === 'suspended') {
+                    return $value;
+                }
+
+                $expiry = $this->attributes['expiry_date'] ?? null;
+
+                return $expiry !== null && $expiry < now()->toDateString() ? 'expired' : $value;
+            },
+        );
+    }
+
+    /**
      * The base fare for one ride on this card — banded on how far the card's
      * segment actually runs along the route, so a Cola-to-Khalde card is
      * cheaper than a Khalde-to-Tyre one.

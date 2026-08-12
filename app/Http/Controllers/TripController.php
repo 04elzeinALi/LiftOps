@@ -132,6 +132,23 @@ class TripController extends Controller
                 'status' => 'required|in:scheduled,ongoing,completed,cancelled,emergency',
             ]);
 
+            // Starting and ending a trip is the only moment anyone actually
+            // knows when it ran, so record it here. Before this, the actual
+            // times were only ever filled in by an admin typing them into the
+            // trip form, which meant there was no honest basis for comparing
+            // a trip against its timetable.
+            //
+            // Only stamped when not already set: an admin correcting a time
+            // afterwards shouldn't be overwritten if the driver re-saves, and
+            // re-entering a status shouldn't move the clock.
+            if ($validated['status'] === 'ongoing' && ! $trip->actual_departure) {
+                $validated['actual_departure'] = now();
+            }
+
+            if ($validated['status'] === 'completed' && ! $trip->actual_arrival) {
+                $validated['actual_arrival'] = now();
+            }
+
             $trip->update($validated);
 
             return $trip;

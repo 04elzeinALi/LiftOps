@@ -22,6 +22,8 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\PricingSettingController;
 use App\Http\Controllers\CashBoardingController;
+use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\ReportController;
 
 
 
@@ -71,6 +73,15 @@ Route::middleware('auth:sanctum')->group(function () {
         // "summary" gets swallowed by the payments/{payment} show route.
         Route::get('payments/summary', [PaymentController::class, 'summary']);
 
+    // Operational reports. Admin-only: these aggregate across every
+    // passenger, driver and payment in the system.
+    Route::middleware('role:admin')->prefix('reports')->group(function () {
+        Route::get('revenue', [ReportController::class, 'revenue']);
+        Route::get('driver-cash', [ReportController::class, 'driverCash']);
+        Route::get('ridership', [ReportController::class, 'ridership']);
+        Route::get('fleet', [ReportController::class, 'fleet']);
+    });
+
         // Admin-only per-user activity for one local day. Passengers'
         // apiResource lives in the ownership-gated group below, so these
         // admin views are declared explicitly here.
@@ -103,6 +114,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('cash-boardings', CashBoardingController::class)->only(['index', 'show', 'store', 'destroy']);
     Route::apiResource('payments', PaymentController::class);
     Route::apiResource('attendance', AttendanceController::class);
+
+    // A person's own in-app messages (see NotificationController — every
+    // action is scoped to the signed-in user, whatever their role).
+    Route::get('notifications', [NotificationController::class, 'index']);
+    Route::put('notifications/read-all', [NotificationController::class, 'markAllRead']);
+    Route::put('notifications/{id}/read', [NotificationController::class, 'markRead']);
 });
 
 

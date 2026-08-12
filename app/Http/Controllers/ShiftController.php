@@ -4,12 +4,72 @@ namespace App\Http\Controllers;
 
 use App\Models\Bus;
 use App\Models\Driver;
+use App\Models\Notification;
+use App\Models\Reservation;
 use App\Models\Shift;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class ShiftController extends Controller
 {
+    /**
+     * Calls off every segment of a shift, and every live booking on them.
+     *
+     * A cancelled shift used to leave its segments 'scheduled', which meant
+     * passengers could still see and book a bus that was never going to run.
+     * Cancelling the reservations is also what gives each passenger their trip
+     * back: TravelCard::remainingTrips() counts only 'booked' and 'completed'
+     * reservations, so a cancelled one stops being charged against the card.
+     *
+     * Everyone affected is told, because the alternative is a passenger
+     * standing at a stop waiting for a bus that isn't coming. Segments that
+     * already ran (completed) are left alone — they happened.
+     */
+    private function cancelShiftWork(Shift $shift): void
+    {
+        $routeName = $shift->route?->route_name ?? 'your route';
+        $shiftDate = $shift->shift_date?->format('d/m/Y') ?? '';
+
+        $trips = $shift->trips()->whereNotIn('status', ['completed', 'cancelled'])->get();
+
+        foreach ($trips as $trip) {
+            $reservations = Reservation::with('passenger')
+                ->where('trip_id', $trip->id)
+                ->where('status', 'booked')
+                ->get();
+
+            foreach ($reservations as $reservation) {
+                $reservation->update(['status' => 'cancelled']);
+
+                $userId = $reservation->passenger?->user_id;
+                if ($userId) {
+                    $departure = $trip->departure_time ? substr($trip->departure_time, 0, 5) : '';
+                    Notification::send(
+                        $userId,
+                        'trip_cancelled',
+                        'Your trip was cancelled',
+                        trim("The {$departure} trip on {$routeName} on {$shiftDate} has been cancelled. "
+                            . 'Your booking is cancelled and the trip has been returned to your travel card.')
+                    );
+                }
+            }
+
+            $trip->update(['status' => 'cancelled']);
+        }
+
+        // The driver finds out from the same place their shifts come from.
+        $driverUserId = $shift->driver?->user_id;
+        if ($driverUserId) {
+            Notification::send(
+                $driverUserId,
+                'shift_cancelled',
+                'Your shift was cancelled',
+                trim("Your shift on {$routeName} on {$shiftDate} has been cancelled. "
+                    . 'Its segments are off, and anyone who had booked has been told.')
+            );
+        }
+    }
+
     /**
      * Display a listing of the resource.
      *
@@ -145,10 +205,33 @@ class ShiftController extends Controller
             return $error;
         }
 
-        DB::transaction(function () use ($shift, $validated) {
+        $newStatus = $validated['status'] ?? null;
+        // Only the transition INTO cancelled calls the work off — re-saving an
+        // already-cancelled shift mustn't fire a second round of notifications
+        // at people who were told days ago.
+        $isCancelling = $newStatus === 'cancelled' && $shift->status !== 'cancelled';
+        // And the way back out puts the segments on again. Bookings are NOT
+        // restored: those passengers were told it was off and had their trip
+        // refunded to their card, so they rebook if they still want the seat.
+        $isReinstating = $newStatus !== null && $newStatus !== 'cancelled' && $shift->status === 'cancelled';
+
+        DB::transaction(function () use ($shift, $validated, $isCancelling, $isReinstating) {
             $shift->update($validated);
-            // The hours or round count may have moved, so bring the legs back
-            // in line with the shift they belong to.
+
+            if ($isCancelling) {
+                // Cancel the segments and their bookings BEFORE syncing, so
+                // syncTrips() sees the final state and doesn't reshape trips
+                // that are now called off.
+                $this->cancelShiftWork($shift->fresh()->load(['route', 'driver']));
+                return;
+            }
+
+            if ($isReinstating) {
+                $shift->trips()->where('status', 'cancelled')->update(['status' => 'scheduled']);
+            }
+
+            // The hours or round count may have moved, so bring the segments
+            // back in line with the shift they belong to.
             $shift->refresh()->syncTrips();
         });
 

@@ -17,5 +17,12 @@ class Bus extends Model
         return $this->hasMany(Trip::class);
     }
 
-   
+    /**
+     * This bus's repair history. Whether any of these are still open is what
+     * decides the bus's own status — see MaintenanceController::syncBusStatus().
+     */
+    public function maintenances()
+    {
+        return $this->hasMany(Maintenance::class);
+    }
 }
