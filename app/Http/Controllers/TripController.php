@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bus;
 use App\Models\Driver;
 use App\Models\Trip;
+use App\Support\PastWorkCloser;
 use Illuminate\Http\Request;
 
 class TripController extends Controller
@@ -14,6 +15,10 @@ class TripController extends Controller
      */
     public function index(Request $request)
     {
+        // Anything whose time has passed is closed out first, so the list
+        // never shows yesterday's run still sitting on 'scheduled'.
+        PastWorkCloser::sweepThrottled();
+
         $query = Trip::with(['schedule.route.originStation', 'schedule.route.destinationStation', 'shift.route.originStation', 'shift.route.destinationStation', 'bus', 'driver'])
             ->withCount(['reservations as booked_reservations_count' => fn ($q) => $q->where('status', 'booked'), 'boardings']);
 

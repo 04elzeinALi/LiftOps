@@ -7,6 +7,7 @@ use App\Models\Driver;
 use App\Models\Notification;
 use App\Models\Reservation;
 use App\Models\Shift;
+use App\Support\PastWorkCloser;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -79,6 +80,10 @@ class ShiftController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
+
+        // Anything whose time has passed is closed out first, so a driver's
+        // day doesn't keep showing last week's shift as still to come.
+        PastWorkCloser::sweepThrottled();
 
         $query = Shift::with(['driver', 'bus', 'route'])
             ->withCount('trips');
