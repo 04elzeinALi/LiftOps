@@ -58,31 +58,34 @@ class PastWorkCloser
      */
     public static function sweep(): array
     {
-        $localNow = now(config('app.display_timezone'))->toDateTimeString();
+        // Only work from a PREVIOUS local day is closed — never today's.
+        //
+        // Comparing against the current time instead looked reasonable and was
+        // unusable: an admin setting up a 08:00-17:00 shift during the evening
+        // watched it flip to 'completed' on the next refresh, because by the
+        // clock its window had indeed passed. Same for a trip added an hour
+        // after it was due out. Today's work is what someone is actively
+        // arranging, and this has no business touching it.
+        //
+        // A day boundary is also the only rule that doesn't need to guess how
+        // late is "late enough": once the date has rolled over, the work is
+        // unambiguously behind us.
+        $localToday = now(config('app.display_timezone'))->toDateString();
 
-        // A trip is over once its arrival time has passed. Trips with no
-        // arrival time recorded fall back to the end of their own day, so a
-        // missing timetable can't close a trip early.
         $trips = Trip::whereIn('status', self::OPEN_STATUSES)
-            ->whereRaw(
-                "CONCAT(trip_date, ' ', COALESCE(arrival_time, '23:59:59')) <= ?",
-                [$localNow]
-            )
+            ->whereDate('trip_date', '<', $localToday)
             ->update(['status' => 'completed']);
 
-        // Same for shifts, except a shift can run past midnight: when the end
-        // time is at or before the start time the shift finishes on the
-        // FOLLOWING day, and treating it as same-day would close a night
-        // shift hours before it actually ends.
+        // A shift can run past midnight: when the end time is at or before the
+        // start time it finishes on the FOLLOWING day, so that's the day that
+        // has to be behind us — otherwise last night's 22:00-02:00 shift would
+        // be closed while it was still running.
         $shifts = Shift::whereIn('status', self::OPEN_STATUSES)
             ->whereRaw(
-                "CONCAT(
-                    CASE WHEN end_time <= start_time
-                         THEN DATE_ADD(shift_date, INTERVAL 1 DAY)
-                         ELSE shift_date END,
-                    ' ', end_time
-                 ) <= ?",
-                [$localNow]
+                "(CASE WHEN end_time <= start_time
+                       THEN DATE_ADD(shift_date, INTERVAL 1 DAY)
+                       ELSE shift_date END) < ?",
+                [$localToday]
             )
             ->update(['status' => 'completed']);
 
