@@ -2,14 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Boarding;
 use App\Models\Bus;
 use App\Models\CashBoarding;
 use App\Models\Driver;
 use App\Models\Maintenance;
 use App\Models\Payment;
-use App\Models\Reservation;
-use App\Models\Trip;
 use App\Support\ReportWindow;
 use Illuminate\Http\Request;
 
@@ -179,79 +176,6 @@ class ReportController extends Controller
                 'outstanding' => round($rows->sum('outstanding'), 2),
             ],
             'by_driver' => $rows,
-        ]);
-    }
-
-    /**
-     * Who actually rode, and how full the buses were.
-     *
-     * Filtered on trips.trip_date (a local date) rather than a timestamp, so
-     * a report for "this month" means the month those trips ran.
-     */
-    public function ridership(Request $request)
-    {
-        $window = ReportWindow::fromRequest($request);
-
-        $tripIds = $window->applyToDate(Trip::query(), 'trips.trip_date')->pluck('id');
-
-        $boardings = Boarding::whereIn('trip_id', $tripIds)->count();
-        $cashBoardings = CashBoarding::whereIn('trip_id', $tripIds)->count();
-        $booked = Reservation::whereIn('trip_id', $tripIds)->where('status', 'booked')->count();
-        $cancelled = Reservation::whereIn('trip_id', $tripIds)->where('status', 'cancelled')->count();
-        $completed = Reservation::whereIn('trip_id', $tripIds)->where('status', 'completed')->count();
-
-        // A reservation that was never boarded and never cancelled, on a trip
-        // that has already run — someone who booked a seat and didn't show.
-        $noShows = Reservation::whereIn('trip_id', $tripIds)
-            ->where('status', 'booked')
-            ->whereHas('trip', fn ($q) => $q->where('status', 'completed'))
-            ->count();
-
-        // Seats offered across the trips in range, for a load figure.
-        $seatsOffered = (int) $window->applyToDate(Trip::query(), 'trips.trip_date')
-            ->join('buses', 'trips.bus_id', '=', 'buses.id')
-            ->whereIn('trips.status', ['completed', 'ongoing'])
-            ->sum('buses.capacity');
-
-        $riders = $boardings + $cashBoardings;
-
-        $byRoute = $window->applyToDate(Trip::query(), 'trips.trip_date')
-            ->leftJoin('shifts', 'trips.shift_id', '=', 'shifts.id')
-            ->leftJoin('routes', 'shifts.route_id', '=', 'routes.id')
-            ->selectRaw('routes.id as route_id, routes.route_name, COUNT(DISTINCT trips.id) as trips')
-            ->groupBy('routes.id', 'routes.route_name')
-            ->get();
-
-        $byRouteRows = $byRoute->map(function ($r) use ($window) {
-            $ids = $window->applyToDate(Trip::query(), 'trips.trip_date')
-                ->when($r->route_id, fn ($q) => $q->whereHas('shift', fn ($s) => $s->where('route_id', $r->route_id)))
-                ->when(! $r->route_id, fn ($q) => $q->whereNull('shift_id'))
-                ->pluck('id');
-
-            return [
-                'route_id' => $r->route_id ? (int) $r->route_id : null,
-                'route_name' => $r->route_name ?? 'Not part of a shift',
-                'trips' => (int) $r->trips,
-                'riders' => Boarding::whereIn('trip_id', $ids)->count()
-                    + CashBoarding::whereIn('trip_id', $ids)->count(),
-            ];
-        })->sortByDesc('riders')->values();
-
-        return response()->json([
-            'window' => $window->toArray(),
-            'totals' => [
-                'riders' => $riders,
-                'card_boardings' => $boardings,
-                'cash_customers' => $cashBoardings,
-                'trips' => $tripIds->count(),
-                'seats_offered' => $seatsOffered,
-                'load_factor' => $seatsOffered > 0 ? round(($riders / $seatsOffered) * 100, 1) : null,
-                'reservations_booked' => $booked,
-                'reservations_completed' => $completed,
-                'reservations_cancelled' => $cancelled,
-                'no_shows' => $noShows,
-            ],
-            'by_route' => $byRouteRows,
         ]);
     }
 

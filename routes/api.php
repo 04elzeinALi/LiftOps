@@ -78,7 +78,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:admin')->prefix('reports')->group(function () {
         Route::get('revenue', [ReportController::class, 'revenue']);
         Route::get('driver-cash', [ReportController::class, 'driverCash']);
-        Route::get('ridership', [ReportController::class, 'ridership']);
         Route::get('fleet', [ReportController::class, 'fleet']);
     });
 
