@@ -13,11 +13,27 @@ class TravelCardController extends Controller
      * How many trips and how many days of validity a card_type grants.
      * Mirrors the multiplier basis TravelCard::calculatePrice() already uses.
      */
+    /**
+     * What a card type is worth and how long it stays valid.
+     *
+     * Validity follows what was actually bought, which is already visible in
+     * the pricing (see TravelCard::calculatePrice):
+     *
+     *   - single/return are priced at full fare per ride (1x, 2x). Nothing was
+     *     discounted, so nothing has been traded for a deadline — the rider
+     *     keeps the ride they paid for and has a month to take it.
+     *   - weekly/monthly are discounted (0.9x, 0.8x per ride). The time limit
+     *     is what buys that discount: it's a pass, and a pass runs out.
+     *
+     * Single used to expire after one day, which meant a full-price ticket
+     * bought in the evening was worthless by morning with no refund — the
+     * rider lost money for nothing they'd agreed to.
+     */
     private function computeCardTerms(string $cardType): array
     {
         return match ($cardType) {
-            'single' => ['total_trips' => 1, 'expiry_days' => 1],
-            'return' => ['total_trips' => 2, 'expiry_days' => 3],
+            'single' => ['total_trips' => 1, 'expiry_days' => 30],
+            'return' => ['total_trips' => 2, 'expiry_days' => 30],
             'weekly' => ['total_trips' => 5, 'expiry_days' => 7],
             'monthly' => ['total_trips' => 20, 'expiry_days' => 30],
         };
