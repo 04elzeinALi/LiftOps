@@ -77,6 +77,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // passenger, driver and payment in the system.
     Route::middleware('role:admin')->prefix('reports')->group(function () {
         Route::get('revenue', [ReportController::class, 'revenue']);
+        Route::get('revenue/detail', [ReportController::class, 'revenueDetail']);
         Route::get('driver-cash', [ReportController::class, 'driverCash']);
         Route::get('fleet', [ReportController::class, 'fleet']);
     });

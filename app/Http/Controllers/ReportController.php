@@ -7,6 +7,7 @@ use App\Models\CashBoarding;
 use App\Models\Driver;
 use App\Models\Maintenance;
 use App\Models\Payment;
+use App\Models\Route;
 use App\Support\ReportWindow;
 use Illuminate\Http\Request;
 
@@ -115,6 +116,97 @@ class ReportController extends Controller
             'by_method' => $byMethod->values(),
             'by_route' => $byRoute,
             'by_card_type' => $byCardType,
+        ]);
+    }
+
+    /**
+     * The individual transactions behind one slice of revenue() — a payment
+     * method, a route, or a card type — so an admin can see exactly which
+     * dates, drivers and passengers made up a total instead of just the sum.
+     *
+     * Cash customers only exist as a `method` slice ('cash_customer'): they
+     * have no travel card, so they can't be sliced by route or card type —
+     * see the revenue() docblock for why they're a separate table entirely.
+     */
+    public function revenueDetail(Request $request)
+    {
+        $dimension = $request->query('dimension');
+        $value = $request->query('value');
+
+        if (! in_array($dimension, ['method', 'route', 'card_type'], true) || $value === null || $value === '') {
+            abort(422, 'dimension must be one of method, route, card_type, and value is required.');
+        }
+
+        $window = ReportWindow::fromRequest($request);
+
+        if ($dimension === 'method' && $value === 'cash_customer') {
+            $boardings = $window->applyToTimestamp(CashBoarding::query(), 'cash_boardings.boarded_at')
+                ->with(['driver', 'trip.shift.route', 'trip.schedule.route'])
+                ->orderByDesc('boarded_at')
+                ->get();
+
+            $rows = $boardings->map(fn ($b) => [
+                'id' => 'cash-' . $b->id,
+                'date' => optional($b->boarded_at)->toIso8601String(),
+                'driver_name' => $b->driver ? trim($b->driver->first_name . ' ' . $b->driver->last_name) : 'Unknown driver',
+                'passenger_name' => $b->customer_name ?: 'Cash customer',
+                'route_name' => $b->trip?->route?->route_name,
+                'card_type' => null,
+                'payment_method' => 'cash_customer',
+                'payment_status' => 'paid',
+                'amount' => (float) $b->amount,
+            ]);
+
+            $label = 'Cash customers';
+        } else {
+            $query = $window->applyToTimestamp(Payment::query(), 'payments.created_at')
+                ->with(['travelCard.passenger', 'travelCard.route', 'collectedByDriver']);
+
+            match ($dimension) {
+                'method' => $query->where('payment_method', $value),
+                'route' => $query->whereHas('travelCard', fn ($q) => $q->where('route_id', $value)),
+                'card_type' => $query->whereHas('travelCard', fn ($q) => $q->where('card_type', $value)),
+            };
+
+            $payments = $query->orderByDesc('created_at')->get();
+
+            $rows = $payments->map(fn ($p) => [
+                'id' => 'payment-' . $p->id,
+                'date' => optional($p->created_at)->toIso8601String(),
+                'driver_name' => $p->collectedByDriver
+                    ? trim($p->collectedByDriver->first_name . ' ' . $p->collectedByDriver->last_name)
+                    : null,
+                'passenger_name' => $p->travelCard?->passenger
+                    ? trim($p->travelCard->passenger->first_name . ' ' . $p->travelCard->passenger->last_name)
+                    : 'Unknown passenger',
+                'route_name' => $p->travelCard?->route?->route_name,
+                'card_type' => $p->travelCard?->card_type,
+                'payment_method' => $p->payment_method,
+                'payment_status' => $p->payment_status,
+                'amount' => (float) $p->amount,
+            ]);
+
+            $label = match ($dimension) {
+                'method' => ucwords(str_replace('_', ' ', $value)),
+                // Looked up directly rather than off the first row, so the
+                // label still reads correctly when there are no payments in
+                // the selected window (an empty table, not a blank title).
+                'route' => Route::find($value)?->route_name ?? 'Route',
+                'card_type' => ucwords($value),
+            };
+        }
+
+        return response()->json([
+            'window' => $window->toArray(),
+            'dimension' => $dimension,
+            'value' => $value,
+            'label' => $label,
+            'rows' => $rows->values(),
+            'totals' => [
+                'count' => $rows->count(),
+                'billed' => round($rows->sum('amount'), 2),
+                'received' => round($rows->where('payment_status', 'paid')->sum('amount'), 2),
+            ],
         ]);
     }
 

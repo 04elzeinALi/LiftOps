@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Model;
 #[Fillable(['trip_id', 'driver_id', 'customer_name', 'from_station_id', 'to_station_id', 'amount', 'boarded_at'])]
 class CashBoarding extends Model
 {
+    protected $casts = ['boarded_at' => 'datetime'];
+
     public function trip()
     {
         return $this->belongsTo(Trip::class);
